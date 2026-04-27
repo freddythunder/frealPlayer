@@ -48,14 +48,18 @@ class StockAudio
 	public function getFileAudioList($path) {
 		$results = [];
 		$i = 0;
+		$path = rawurldecode(trim((string)$path));
+		if ($path === '') {
+			return $results;
+		}
 		$path = rtrim($path, '/');
-		$files = glob($path . '/*.{flac,mp3,ogg,wav}', GLOB_BRACE);
+		$isFileRequest = is_file($path);
+		$files = $isFileRequest ? [$path] : glob($path . '/*.{flac,mp3,ogg,wav}', GLOB_BRACE);
 
 		foreach ($files as $file) {
-			$path = str_replace("/hdd/repo/", "/repo/", $path);
 			$results[] = [
 				'id' => ++$i,
-				'source' => $path . '/'	. $file,
+				'source' => str_replace("/hdd/repo/", "/repo/", $file),
 				'link' => '',
 				'path' => str_replace("'", "%27", $file),
 				'track' => '',
@@ -74,11 +78,11 @@ class StockAudio
 			];
 		}
 		
-		$dirs = glob($path . '/*', GLOB_ONLYDIR);
+		$dirs = $isFileRequest ? [] : glob($path . '/*', GLOB_ONLYDIR);
 		foreach ($dirs as $file) {
 			$results[] = [
 				'id' => ++$i,
-				'source' => $path . '/'	. $file,
+				'source' => str_replace("/hdd/repo/", "/repo/", $file),
 				'link' => '',
 				'path' => str_replace("'", "%27", $file),
 				'track' => '',

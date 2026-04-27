@@ -31,10 +31,13 @@ class Freal
 		$this->isPlaylist = false;
 		
 		if (isset($_REQUEST['motomode'])) {
-			if ($_SESSION['motomode'] ?? null) {
+			$mode = strtolower((string)$_REQUEST['motomode']);
+			if (in_array($mode, ['1', 'true', 'on', 'yes'], true)) {
+				$_SESSION['motomode'] = true;
+			} else if (in_array($mode, ['0', 'false', 'off', 'no'], true)) {
 				$_SESSION['motomode'] = false;
 			} else {
-				$_SESSION['motomode'] = true;
+				$_SESSION['motomode'] = !($_SESSION['motomode'] ?? false);
 			}
 		}
 		
@@ -71,7 +74,12 @@ class Freal
 
 		$this->firstRun = false;		
 		if (isset($_REQUEST['filepath']) && $_REQUEST['filepath']) {
-			$this->songList = $this->stockAudioModel->getFileAudioList($_REQUEST['filepath']);
+			$filepath = trim((string)$_REQUEST['filepath']);
+			$decodedFilepath = rawurldecode($filepath);
+			if (is_file($decodedFilepath)) {
+				$filepath = dirname($decodedFilepath);
+			}
+			$this->songList = $this->stockAudioModel->getFileAudioList($filepath);
 	
 		} else if (isset($_REQUEST['dirs']) && $_REQUEST['dirs']) {
 			$this->songList = $this->stockAudioModel->getFileAudioList($_REQUEST['dirs']);
@@ -119,6 +127,14 @@ class Freal
 				}
 			}
 			$this->browseHTML .= '<br clear="all">';
+		}
+
+		if (isset($_REQUEST['ajax']) && (string)$_REQUEST['ajax'] === '1') {
+			$mobile = true;
+			ob_start();
+			require('_views/freal_view_songlist.php');
+			echo ob_get_clean();
+			return;
 		}
 
 		require_once('_views/freal_view_index.php');

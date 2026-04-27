@@ -88,8 +88,10 @@ color:white;
 	padding-top:10px;
 }
 #srchResults {
-	overflow: auto;
-    height: 600px;
+	overflow-y: auto;
+	overflow-x: hidden;
+	height: 600px;
+	touch-action: pan-y;
 }
 .playlistWrapper {
 	overflow: auto;
@@ -98,6 +100,21 @@ color:white;
 .playlistButton {
 	font-size: 1.5em;
     padding: 10px;
+}
+.settingsCogButton {
+	font-size: 1.5em;
+	cursor: pointer;
+	padding: 4px 8px;
+}
+.settingsPanel {
+	font-size: 1em;
+}
+.settingsRow {
+	margin-bottom: 28px;
+}
+.settingsPanel .form-check-input {
+	transform: scale(3);
+	transform-origin: right center;
 }
 .browse_wrapper {
 	float:left;
@@ -141,6 +158,27 @@ color:white;
   </div>
 </div>
 
+<div class="offcanvas offcanvas-end" tabindex="-1" id="settingsOffcanvas">
+  <div class="offcanvas-header">
+    <h5 class="offcanvas-title">Player Settings</h5>
+    <button type="button" class="btn-close text-reset" data-bs-dismiss="offcanvas"></button>
+  </div>
+  <div class="offcanvas-body settingsPanel">
+    <div class="d-flex justify-content-between align-items-center settingsRow">
+      <span>Dark Mode</span>
+      <div class="form-check form-switch m-0">
+        <input class="form-check-input" type="checkbox" role="switch" id="darkModeToggle">
+      </div>
+    </div>
+    <div class="d-flex justify-content-between align-items-center settingsRow">
+      <span>Motorcycle Mode</span>
+      <div class="form-check form-switch m-0">
+        <input class="form-check-input" type="checkbox" role="switch" id="motorcycleModeToggle" <?= ($_SESSION['motomode'] ?? null) ? 'checked' : ''; ?>>
+      </div>
+    </div>
+  </div>
+</div>
+
 
 
 <header>
@@ -157,13 +195,19 @@ color:white;
 		</div>
 	</div>
 </div>
-<div id="songplaying"></div>
+<div id="nowPlayingMeta" class="d-flex align-items-center">
+	<img src="" id="nowPlayingArt" class="displayNone" alt="Album art">
+	<div class="nowPlayingText">
+		<div id="songplaying"></div>
+		<div id="breadcrumbs"></div>
+	</div>
+	<?php if ($mobile) { ?>
+	<span class="fa fa-cog settingsCogButton" data-bs-toggle="offcanvas" data-bs-target="#settingsOffcanvas" aria-label="Open player settings"></span>
+	<?php } ?>
+</div>
 <div id="songSelection">
 	<form name="asdf" action="" method="POST">
 	<?php if ($mobile) { ?>
-	<div class="p-1">
-		<span id="breadcrumbs"></span>
-	</div>
 	<div class="mobileSearch d-flex">
 		<div class="">
 			<input type="text" class="srch" name="srch" id="srch">
@@ -214,119 +258,9 @@ color:white;
 </header>
 
 <div id="songlist">
-<?php 
-	$firstdir = true;
-	$incompetech = false; // set this to TRUE for stock music database
-	if (count($this->songList)) { 
-	foreach ($this->songList as $song){ 
-
-
-		if (($song['type'] ?? null) === 'song' || $incompetech) { 
-		$song['path'] = str_replace("/hdd/repo/", "/repo/", $song['path']); ?>
-		<div id="song<?=$song['id'];?>" class="songWrap" data-info='<?=json_encode($song, JSON_HEX_APOS);?>'>
-			<div class="d-flex">
-				<div class="p-1">
-					<?php 
-					@$thumb = str_replace(basename($song['path']), "", $song['path']) 
-						. str_replace(" ", "", array_pop(array_filter(explode("/", str_replace(basename($song['path']), "", $song['path']))))) . '.jpg'; 
-					// error_log('Thumb: ' . $thumb);
-					if (file_exists($thumb)) { ?>
-					<img src="<?= $thumb; ?>" width="62">
-					<?php } ?>
-				</div>
-				<div class="flex-fill p-1">
-					<div class="container">
-						<div class="d-flex">
-
-							<div class="song_name" onClick="getSong(<?=$song['id'];?>)">
-								<span class="name"><?=$song['name'];?></span><br>
-								<span class="source"><?=$song['path'] ?? $song['artist'];?> <?= $song['album'] ? ' :: ' . $song['album'] : ''; ?></span><br>
-								<?php if (!$mobile) { ?>
-								<span class="source"><input type="text" class="width100" value="<?=$song['notes'];?>" data-id="<?= $song['id']; ?>" onclick="event.stopPropagation()" onblur="saveNotes(this)"></span>
-								<?php } ?>
-								<?php if ($song['notes'] ?? null) { ?>
-								<p><em><?= $song['notes']; ?></em></p>
-								<?php } ?>
-							</div>
-					
-							<div class="song_info">
-								<?php // $song['length']; $song['genre']; $song['id']; ?>
-							</div>
-					
-							<?php if (!$mobile) { ?>
-							<div class="song_rating" id="songrate<?= $song['id']; ?>">
-								<input type="text" value="https://www.tacofever.com/<?= $song['source']; ?>" onclick="this.select()">
-								<br>
-								<i class="fa fa-star<?=$song['rating']>=1?null:'-o';?>" data-id="<?=$song['id']?>" data-rate="1"></i>
-								<i class="fa fa-star<?=$song['rating']>=2?null:'-o';?>" data-id="<?=$song['id']?>" data-rate="2"></i>
-								<i class="fa fa-star<?=$song['rating']>=3?null:'-o';?>" data-id="<?=$song['id']?>" data-rate="3"></i>
-								<i class="fa fa-star<?=$song['rating']>=4?null:'-o';?>" data-id="<?=$song['id']?>" data-rate="4"></i>
-								<i class="fa fa-star<?=$song['rating']>=5?null:'-o';?>" data-id="<?=$song['id']?>" data-rate="5"></i>
-							</div>
-							<?php } else { ?>
-							<div class="">
-								<?php if (!$mobile) { ?>
-									<span class="fa fa-clipboard board" onclick="navigator.clipboard.writeText('https://www.tacofever.com<?= $song['path']; ?>')"></span></button>
-								<?php } else { 
-									if (!$this->isPlaylist) { ?>
-									<span class="fa fa-plus-circle playlistIcon" data-bs-toggle="offcanvas" data-bs-target="#offcanvas"></span>
-								<?php } else { ?>
-									<span class="fa fa-trash deleteFromPlaylist"></span>
-								<?php }
-								} ?>
-							</div>
-							<?php } ?>
-					
-						</div>
-					</div>
-				</div>
-			</div>
-		</div>
-		
-		
-		<?php } else if (($song['type'] ?? null) === 'directory') { 
-			if ($firstdir) {
-				$class = 'dirWrapFirst';
-				$firstdir = false;
-			} else {
-				$class = '';
-			}
-		?>
-		<div class="dirWrap dopost <?= $class; ?>" data-band="<?= $song['path']; ?>" data-info='<?= json_encode($song, JSON_HEX_APOS);?>'>
-			<div class="d-flex">
-				<div class="p-1">
-					<?php 
-					$thumb = $song['path'] . '/' . str_replace(" ", "", basename($song['name'])) . '.jpg';
-					if (file_exists($thumb)) { ?>
-					<img src="<?= $thumb; ?>" width="62">
-					<?php } ?>
-				</div>
-				<div class="flex-fill p-1">
-					<div class="displayInline">
-						<i class="fas fa-record-vinyl"></i>
-					</div>
-					<div class="displayInline">
-						<span class="name"><?= basename($song['name']); ?></span><br>
-						<span class="source"><?= $song['path']; ?></span>
-					</div>
-				</div>
-			</div>
-		</div>
-		<?php } ?>
-<?php } 
-	} else { ?>
-		<p>Sorry Charlie, you gots no results...</p>
-<?php } 
-	if ($this->firstRun) { ?>
-	<h5>Browse Music</h5>
-	<?= $this->browseHTML; ?>
-	
-	
-	<?php }
-?>
+<?php require('_views/freal_view_songlist.php'); ?>
 
 </div>
-<div class="fa-solid fa-motorcycle playlistIcon motomode"></div>
 </div>
 <style>
 .debugwrapper {
