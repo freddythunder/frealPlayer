@@ -1,4 +1,5 @@
 <?php
+session_start();
 class FrealApi
 {
 	private $bs;
@@ -49,11 +50,31 @@ class FrealApi
 	}
 	
 	public function doSearch() {
-		$srch = preg_replace("[^a-zA-Z0-9\s]", "", $_REQUEST['srch']);
+		$srch = preg_replace("/[^a-zA-Z0-9\s]/", "", (string)($_REQUEST['srch'] ?? ''));
+		$html = '<div class="searchResultContainer">';
+
+		if (!empty($_SESSION['stockmode'])) {
+			$songs = $this->stockAudioModel->searchStockAudio($_REQUEST['srch'] ?? '');
+			if (count($songs)) {
+				$html .= '<div class="searchHeader">Stock Audio</div>';
+				foreach ($songs as $song) {
+					$html .= '<div class="searchSong dopost" data-stock-id="' . (int)$song['id'] . '">';
+					$html .= '<div class="name">' . $this->h($song['name']) . '</div>';
+					$html .= '<div class="tiny">' . $this->h($song['source']) . ' :: ' . $this->h($song['genre']) . '</div>';
+					$html .= '<div class="tiny">' . $this->h($song['path']) . '</div>';
+					if (!empty($song['notes'])) {
+						$html .= '<div class="tiny"><em>' . $this->h($song['notes']) . '</em></div>';
+					}
+					$html .= '</div>';
+				}
+			}
+			$html .= '</div>';
+			echo json_encode(['success' => true, 'html' => $html]);
+			die();
+		}
+
 		$bands = [];
 		$songs = [];
-		$playlists = [];
-		$final = [];
 		// search directories
 		$dir = '/hdd3/music/';
 		$cmd = "find $dir -type d -iname \"*" . escapeshellcmd($srch) . "*\" 2>/dev/null";
@@ -82,7 +103,6 @@ class FrealApi
 			}
 		}
 		
-		$html = '<div class="searchResultContainer">';
 		// bands
 		if (count($bands)) {
 			$bands = array_unique($bands);
@@ -131,6 +151,10 @@ class FrealApi
 		$to = ['', ' - '];
 		$out = str_replace($from, $to, $in);
 		return $out;
+	}
+
+	private function h($in) {
+		return htmlspecialchars((string)$in, ENT_QUOTES, 'UTF-8');
 	}
 	
 }
