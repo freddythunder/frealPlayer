@@ -44,6 +44,57 @@ class StockAudio
 		}
 		
 	}
+
+	public function searchStockAudio($srch, $limit = 100)
+	{
+		$srch = trim((string)$srch);
+		if ($srch === '') {
+			return [];
+		}
+		$term = $this->clean($srch);
+		$limit = max(1, min(500, (int)$limit));
+		$query = "SELECT id, source, path, name, genre, notes
+			FROM stock_audio
+			WHERE name LIKE '%{$term}%'
+				OR notes LIKE '%{$term}%'
+				OR genre LIKE '%{$term}%'
+				OR source LIKE '%{$term}%'
+				OR path LIKE '%{$term}%'
+			ORDER BY name
+			LIMIT {$limit}";
+		try {
+			$stmt = $this->db->query($query) or die('no query '.$this->db->error.chr(10).$query);
+			$results = [];
+			while ($row = $stmt->fetch_assoc()) {
+				$row['path'] = rawurldecode((string)($row['path'] ?? ''));
+				$results[] = $row;
+			}
+			return $results;
+		} catch (Exception $e) {
+			die($e->getMessage() . '<br>' . $query);
+		}
+	}
+
+	public function getAudioById($id)
+	{
+		$id = (int)$id;
+		if ($id < 1) {
+			return [];
+		}
+		$query = "SELECT * FROM stock_audio WHERE id={$id} LIMIT 1";
+		try {
+			$stmt = $this->db->query($query) or die('no query '.$this->db->error.chr(10).$query);
+			$row = $stmt->fetch_assoc();
+			if (!$row) {
+				return [];
+			}
+			$row['path'] = rawurldecode((string)($row['path'] ?? ''));
+			$row['type'] = 'song';
+			return [$row];
+		} catch (Exception $e) {
+			die($e->getMessage() . '<br>' . $query);
+		}
+	}
 	
 	public function getFileAudioList($path) {
 		$results = [];

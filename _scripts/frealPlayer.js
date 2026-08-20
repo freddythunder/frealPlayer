@@ -3,6 +3,64 @@
 var songId = 0;
 var server = window.location.host;
 var playlistData = {};
+var abLoopStart = 0;
+var abLoopEnd = 0;
+var abLoopActive = false;
+
+function getAudioElement() {
+	return document.getElementById('myaudio');
+}
+
+function formatAbLoopTime(seconds) {
+	let mins = Math.floor(seconds / 60);
+	let secs = Math.floor(seconds % 60);
+	let tenths = Math.floor((seconds % 1) * 10);
+	return mins + ':' + String(secs).padStart(2, '0') + '.' + tenths;
+}
+
+function updateAbLoopStatus() {
+	let status = $('#abLoopStatus');
+	if (!$('#abLoopA').hasClass('active') && !$('#abLoopB').hasClass('active')) {
+		status.text('');
+		return;
+	}
+	let text = 'A: ' + formatAbLoopTime(abLoopStart);
+	if ($('#abLoopB').hasClass('active')) {
+		text += '  B: ' + formatAbLoopTime(abLoopEnd);
+		if (abLoopActive) {
+			text += ' (looping)';
+		}
+	}
+	status.text(text);
+}
+
+function onAbLoopTimeUpdate() {
+	let audio = getAudioElement();
+	if (abLoopActive && audio.currentTime >= abLoopEnd) {
+		audio.currentTime = abLoopStart;
+	}
+}
+
+function stopAbLoopListener() {
+	$(getAudioElement()).off('timeupdate.abloop', onAbLoopTimeUpdate);
+}
+
+function clearAbLoop() {
+	abLoopStart = 0;
+	abLoopEnd = 0;
+	abLoopActive = false;
+	$('#abLoopA, #abLoopB').removeClass('active');
+	stopAbLoopListener();
+	updateAbLoopStatus();
+}
+
+function startAbLoop() {
+	abLoopActive = true;
+	$('#abLoopB').addClass('active');
+	stopAbLoopListener();
+	$(getAudioElement()).on('timeupdate.abloop', onAbLoopTimeUpdate);
+	updateAbLoopStatus();
+}
 
 function setNowPlayingArtwork(songPath) {
 	let art = $('#nowPlayingArt');
@@ -45,6 +103,7 @@ function getSong(id){
 	// change the title to show in the car
 	$('title').html(data.name);
 	setNowPlayingArtwork(data.path);
+	clearAbLoop();
 	
 }
 /* not sequencital */
@@ -239,6 +298,11 @@ $(document).on('click', '.dopost', function(e) {
 			playlist: $(this).data('playlist')
 		});
 	}
+	if ($(this).data('stockId')) {
+		loadSongList({
+			stockid: $(this).data('stockId')
+		});
+	}
 	$('#srchResults').html('').addClass('displayNone');
 	$('#motoButtons').removeClass('displayNone');
 	if (isSearchResultClick) {
@@ -290,6 +354,45 @@ $(document).on('change', '#motorcycleModeToggle', function() {
 	let url = new URL(window.location);
 	url.searchParams.set('motomode', isEnabled ? '1' : '0');
 	window.location = url.toString();
+});
+
+$(document).on('change', '#stockAudioModeToggle', function() {
+	let isEnabled = $(this).is(':checked');
+	let url = new URL(window.location);
+	url.searchParams.set('stockmode', isEnabled ? '1' : '0');
+	window.location = url.toString();
+});
+
+$(document).on('click', '#abLoopA', function() {
+	let audio = getAudioElement();
+	if ($(this).hasClass('active')) {
+		clearAbLoop();
+		return;
+	}
+	abLoopStart = audio.currentTime;
+	$(this).addClass('active');
+	if (abLoopActive) {
+		abLoopActive = false;
+		$('#abLoopB').removeClass('active');
+		stopAbLoopListener();
+	}
+	updateAbLoopStatus();
+});
+
+$(document).on('click', '#abLoopB', function() {
+	let audio = getAudioElement();
+	if ($(this).hasClass('active') && abLoopActive) {
+		clearAbLoop();
+		return;
+	}
+	if (!$('#abLoopA').hasClass('active')) {
+		return;
+	}
+	abLoopEnd = audio.currentTime;
+	if (abLoopEnd <= abLoopStart) {
+		return;
+	}
+	startAbLoop();
 });
 
 $(document).on('click', '.motoStart', function(e) {
