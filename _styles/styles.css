@@ -34,6 +34,41 @@ flex:1 1 auto;
 font-size:12px;
 line-height:1.2;
 }
+.abLoopButtons {
+display:flex;
+gap:8px;
+}
+.abLoopButton {
+background-color:#F1F3F4;
+border:1px solid #999;
+border-radius:50%;
+width:44px;
+height:44px;
+font:bold 18px verdana, arial;
+cursor:pointer;
+padding:0;
+}
+.abLoopButton.active {
+background-color:#0096FF;
+border-color:#0096FF;
+color:#FFF;
+}
+.abLoopStatus {
+font-size:11px;
+line-height:1.3;
+margin-top:8px;
+min-height:14px;
+color:#666;
+}
+@media (min-width: 768px) {
+.settingsCogButton {
+margin-right:40px;
+}
+#settingsOffcanvas .offcanvas-header .btn-close,
+#offcanvas .offcanvas-header .btn-close {
+margin-right:40px;
+}
+}
 header {
 position:fixed;
 z-index:5;
@@ -221,6 +256,14 @@ body.dark-mode .fa {
 }
 body.dark-mode #nowPlayingArt {
 	border-color: #666;
+}
+body.dark-mode .abLoopButton.active {
+	background-color: #0096FF;
+	border-color: #0096FF;
+	color: #fff;
+}
+body.dark-mode .abLoopStatus {
+	color: #bbb;
 }
 body.dark-mode input,
 body.dark-mode select,

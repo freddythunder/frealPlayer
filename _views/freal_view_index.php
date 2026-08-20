@@ -176,6 +176,22 @@ color:white;
         <input class="form-check-input" type="checkbox" role="switch" id="motorcycleModeToggle" <?= ($_SESSION['motomode'] ?? null) ? 'checked' : ''; ?>>
       </div>
     </div>
+    <div class="d-flex justify-content-between align-items-center settingsRow">
+      <span>Stock Audio Mode</span>
+      <div class="form-check form-switch m-0">
+        <input class="form-check-input" type="checkbox" role="switch" id="stockAudioModeToggle" <?= ($_SESSION['stockmode'] ?? null) ? 'checked' : ''; ?>>
+      </div>
+    </div>
+    <div class="settingsRow">
+      <div class="d-flex justify-content-between align-items-center">
+        <span>A-B Loop</span>
+        <div class="abLoopButtons">
+          <button type="button" class="abLoopButton" id="abLoopA" aria-label="Set loop start">A</button>
+          <button type="button" class="abLoopButton" id="abLoopB" aria-label="Set loop end">B</button>
+        </div>
+      </div>
+      <div id="abLoopStatus" class="abLoopStatus"></div>
+    </div>
   </div>
 </div>
 

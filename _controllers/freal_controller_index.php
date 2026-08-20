@@ -40,6 +40,17 @@ class Freal
 				$_SESSION['motomode'] = !($_SESSION['motomode'] ?? false);
 			}
 		}
+
+		if (isset($_REQUEST['stockmode'])) {
+			$mode = strtolower((string)$_REQUEST['stockmode']);
+			if (in_array($mode, ['1', 'true', 'on', 'yes'], true)) {
+				$_SESSION['stockmode'] = true;
+			} else if (in_array($mode, ['0', 'false', 'off', 'no'], true)) {
+				$_SESSION['stockmode'] = false;
+			} else {
+				$_SESSION['stockmode'] = !($_SESSION['stockmode'] ?? false);
+			}
+		}
 		
 		// for rating songs:
 		if (isset($_REQUEST['cmd']) && $_REQUEST['cmd'] == 'rateSong') {
@@ -83,6 +94,8 @@ class Freal
 	
 		} else if (isset($_REQUEST['dirs']) && $_REQUEST['dirs']) {
 			$this->songList = $this->stockAudioModel->getFileAudioList($_REQUEST['dirs']);
+		} else if ($_REQUEST['stockid'] ?? null) {
+			$this->songList = $this->stockAudioModel->getAudioById($_REQUEST['stockid']);
 		} else if ($_REQUEST['playlist'] ?? null) {
 			$this->songList = [];
 			$playlistSongs = $this->playlist->getPlaylistByName($_REQUEST['playlist']);
