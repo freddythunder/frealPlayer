@@ -3,9 +3,19 @@
 var songId = 0;
 var server = window.location.host;
 var playlistData = {};
+var currentSongData = null;
+var artworkRequestId = 0;
+var lastPositionStateAt = 0;
+var mediaSessionHandlersBound = false;
 var abLoopStart = 0;
 var abLoopEnd = 0;
 var abLoopActive = false;
+var lyricsOverlayOpen = false;
+var lyricsUserScrolling = false;
+var lyricsUserScrollTimer = null;
+var lyricsRequestId = 0;
+var lyricsSongPath = '';
+var lyricsActiveButton = null;
 
 function getAudioElement() {
 	return document.getElementById('myaudio');
@@ -62,26 +72,239 @@ function startAbLoop() {
 	updateAbLoopStatus();
 }
 
-function setNowPlayingArtwork(songPath) {
-	let art = $('#nowPlayingArt');
+function getFolderName(songPath) {
 	if (!songPath) {
-		art.addClass('displayNone').attr('src', '');
-		return;
+		return '';
 	}
 	let folderPath = songPath.replace(/\/[^/]+$/, '');
-	let folderName = folderPath.split('/').pop() || '';
-	let imageName = folderName.replace(/[^a-zA-Z]/g, '');
+	return folderPath.split('/').pop() || '';
+}
+
+function getAlbumArtPath(songPath) {
+	if (!songPath) {
+		return '';
+	}
+	let folderPath = songPath.replace(/\/[^/]+$/, '');
+	let folderName = getFolderName(songPath);
+	let imageName = folderName.replace(/ /g, '');
 	if (!imageName) {
-		art.addClass('displayNone').attr('src', '');
+		return '';
+	}
+	return folderPath + '/' + imageName + '.jpg';
+}
+
+function getAlbumName(data) {
+	if (data && data.album) {
+		return data.album;
+	}
+	return getFolderName(data && data.path);
+}
+
+function getArtistName(data) {
+	let songPath = (data && data.path) || '';
+	if (songPath) {
+		try {
+			songPath = decodeURIComponent(songPath);
+		} catch (e) {}
+		let parts = songPath.split('/').filter(function(part) {
+			return part !== '';
+		});
+		let musicIndex = parts.indexOf('music');
+		if (musicIndex !== -1 && parts[musicIndex + 1]) {
+			return parts[musicIndex + 1];
+		}
+	}
+	if (data && data.artist) {
+		return data.artist;
+	}
+	return 'FrealPlayer';
+}
+
+function getAbsoluteUrl(path) {
+	if (!path) {
+		return new URL('favicon.ico', window.location.href).href;
+	}
+	if (/^https?:\/\//i.test(path)) {
+		return path;
+	}
+	return new URL(path, window.location.origin).href;
+}
+
+function updateMediaSession(data, artworkSrc) {
+	if (!('mediaSession' in navigator) || typeof MediaMetadata === 'undefined' || !data) {
 		return;
 	}
-	let imagePath = folderPath + '/' + imageName + '.jpg';
+	let artworkUrl = getAbsoluteUrl(artworkSrc);
+	let artworkType = artworkSrc ? 'image/jpeg' : 'image/x-icon';
+	navigator.mediaSession.metadata = new MediaMetadata({
+		title: data.name || '',
+		artist: getArtistName(data),
+		album: getAlbumName(data),
+		artwork: [
+			{ src: artworkUrl, sizes: '96x96', type: artworkType },
+			{ src: artworkUrl, sizes: '128x128', type: artworkType },
+			{ src: artworkUrl, sizes: '192x192', type: artworkType },
+			{ src: artworkUrl, sizes: '256x256', type: artworkType },
+			{ src: artworkUrl, sizes: '384x384', type: artworkType },
+			{ src: artworkUrl, sizes: '512x512', type: artworkType }
+		]
+	});
+}
+
+function resetMediaPositionState() {
+	if (!('mediaSession' in navigator) || !navigator.mediaSession.setPositionState) {
+		return;
+	}
+	try {
+		navigator.mediaSession.setPositionState(null);
+	} catch (e) {}
+	lastPositionStateAt = 0;
+}
+
+function updateMediaPositionState(force) {
+	if (!('mediaSession' in navigator) || !navigator.mediaSession.setPositionState) {
+		return;
+	}
+	let audio = getAudioElement();
+	if (!audio) {
+		return;
+	}
+	let duration = audio.duration;
+	let position = audio.currentTime || 0;
+	if (!duration || !isFinite(duration) || duration <= 0) {
+		resetMediaPositionState();
+		return;
+	}
+	if (position > duration) {
+		position = duration;
+	}
+	if (!force && (Date.now() - lastPositionStateAt) < 1000) {
+		return;
+	}
+	try {
+		navigator.mediaSession.setPositionState({
+			duration: duration,
+			playbackRate: audio.playbackRate || 1,
+			position: position
+		});
+		lastPositionStateAt = Date.now();
+	} catch (e) {}
+}
+
+function setMediaPlaybackState(state) {
+	if (!('mediaSession' in navigator)) {
+		return;
+	}
+	navigator.mediaSession.playbackState = state;
+}
+
+function bindMediaSessionAction(action, handler) {
+	if (!('mediaSession' in navigator)) {
+		return;
+	}
+	try {
+		navigator.mediaSession.setActionHandler(action, handler);
+	} catch (e) {}
+}
+
+function initMediaSessionHandlers() {
+	if (mediaSessionHandlersBound || !('mediaSession' in navigator)) {
+		return;
+	}
+	mediaSessionHandlersBound = true;
+	bindMediaSessionAction('play', function() {
+		getAudioElement().play();
+	});
+	bindMediaSessionAction('pause', function() {
+		getAudioElement().pause();
+	});
+	bindMediaSessionAction('previoustrack', function() {
+		getPrev();
+	});
+	bindMediaSessionAction('nexttrack', function() {
+		getNext();
+	});
+	bindMediaSessionAction('seekto', function(details) {
+		let audio = getAudioElement();
+		if (details && details.fastSeek && audio.fastSeek) {
+			audio.fastSeek(details.seekTime);
+		} else if (details) {
+			audio.currentTime = details.seekTime;
+		}
+		updateMediaPositionState(true);
+	});
+	bindMediaSessionAction('seekbackward', function(details) {
+		let audio = getAudioElement();
+		audio.currentTime = Math.max(0, audio.currentTime - ((details && details.seekOffset) || 10));
+		updateMediaPositionState(true);
+	});
+	bindMediaSessionAction('seekforward', function(details) {
+		let audio = getAudioElement();
+		let offset = (details && details.seekOffset) || 10;
+		let nextTime = audio.currentTime + offset;
+		if (audio.duration && isFinite(audio.duration)) {
+			nextTime = Math.min(audio.duration, nextTime);
+		}
+		audio.currentTime = nextTime;
+		updateMediaPositionState(true);
+	});
+}
+
+function bindMediaSessionAudioEvents() {
+	let audio = getAudioElement();
+	if (!audio || audio.dataset.mediaSessionBound) {
+		return;
+	}
+	audio.dataset.mediaSessionBound = '1';
+	audio.addEventListener('loadstart', function() {
+		resetMediaPositionState();
+	});
+	audio.addEventListener('loadedmetadata', function() {
+		resetMediaPositionState();
+		updateMediaPositionState(true);
+	});
+	audio.addEventListener('durationchange', function() {
+		updateMediaPositionState(true);
+	});
+	audio.addEventListener('seeked', function() {
+		updateMediaPositionState(true);
+	});
+	audio.addEventListener('play', function() {
+		setMediaPlaybackState('playing');
+		updateMediaPositionState(true);
+	});
+	audio.addEventListener('pause', function() {
+		setMediaPlaybackState('paused');
+		updateMediaPositionState(true);
+	});
+	audio.addEventListener('timeupdate', function() {
+		updateMediaPositionState(false);
+	});
+}
+
+function setNowPlayingArtwork(songPath) {
+	let art = $('#nowPlayingArt');
+	let requestId = ++artworkRequestId;
+	let imagePath = getAlbumArtPath(songPath);
+	if (!imagePath) {
+		art.addClass('displayNone').attr('src', '');
+		updateMediaSession(currentSongData, '');
+		return;
+	}
 	art.off('load error');
 	art.on('load', function() {
+		if (requestId !== artworkRequestId) {
+			return;
+		}
 		art.removeClass('displayNone');
+		updateMediaSession(currentSongData, imagePath);
 	});
 	art.on('error', function() {
+		if (requestId !== artworkRequestId) {
+			return;
+		}
 		art.addClass('displayNone');
+		updateMediaSession(currentSongData, '');
 	});
 	art.attr('src', imagePath + '?cache=' + (new Date().getMilliseconds()));
 }
@@ -90,6 +313,8 @@ function getSong(id){
 	songId = id;
 	var data = $('#song'+id).data('info');
 	console.log(data);
+	currentSongData = data;
+	resetMediaPositionState();
 	$('#myaudio').attr('src', '//'+server+data.path.replace(/'/g, "\\'") + '?cache=' + (new Date().getMilliseconds()));
 	// $('#myaudio').attr('src', '//' + server + escape(data.path));
 	document.getElementById('myaudio').play();
@@ -102,7 +327,9 @@ function getSong(id){
 	$('#song'+data.id).css('backgroundColor', activeSongBg);
 	// change the title to show in the car
 	$('title').html(data.name);
+	updateMediaSession(data, '');
 	setNowPlayingArtwork(data.path);
+	setMediaPlaybackState('playing');
 	clearAbLoop();
 	
 }
@@ -133,18 +360,50 @@ window.onerror = (msg, src, line, col, err) => {
 	logMessage(html);
 }
 
+function normalizeSongPath(path) {
+	if (!path) {
+		return '';
+	}
+	let value = String(path);
+	try {
+		value = decodeURIComponent(value);
+	} catch (e) {}
+	value = value.replace(/\+/g, ' ');
+	value = value.replace(/'/g, '%27');
+	value = value.replace(/\/hdd\/repo\//g, '/repo/');
+	return value;
+}
+
+function songPathMatches(songPath, targetPath) {
+	let song = normalizeSongPath(songPath);
+	let target = normalizeSongPath(targetPath);
+	if (!song || !target) {
+		return false;
+	}
+	if (song === target || song.indexOf(target) !== -1 || target.indexOf(song) !== -1) {
+		return true;
+	}
+	let songBase = song.split('/').pop();
+	let targetBase = target.split('/').pop();
+	return !!(songBase && targetBase && songBase === targetBase);
+}
+
 function getSelectionTargetFromUrl() {
 	let searchParams = new URLSearchParams(window.location.search);
 	let selected = searchParams.get('selected');
 	if (selected) {
-		return selected.replace(/'/g, '%27');
+		return selected;
 	}
 	if (window.location.hash !== '') {
-		return decodeURI(window.location.hash.replace(/#/, '')).replace(/'/g, '%27');
+		try {
+			return decodeURI(window.location.hash.replace(/#/, ''));
+		} catch (e) {
+			return window.location.hash.replace(/#/, '');
+		}
 	}
 	let filepath = searchParams.get('filepath');
 	if (filepath && /\.(mp3|flac|ogg|wav)$/i.test(filepath)) {
-		return filepath.replace(/'/g, '%27');
+		return filepath;
 	}
 	return '';
 }
@@ -155,17 +414,21 @@ function scrollToSelectedSong() {
 		return;
 	}
 	let id = '';
-	$('.songWrap').each(function(i, v) {
+	$('.songWrap').each(function() {
 		let info = $(this).data('info');
-		if (info && info.path && info.path.indexOf(targetPath) !== -1) {
+		if (info && songPathMatches(info.path, targetPath)) {
 			id = info.id;
 		}
 	});
 	if (id) {
+		let song = $('#song' + id);
+		if (!song.length || !song.offset()) {
+			return;
+		}
 		$('html,body').animate({
-			scrollTop: $('#song' + id).offset().top - 250
+			scrollTop: song.offset().top - 250
 		}, 200);
-		$('#song' + id).css({ backgroundColor:'#FCFFCF' });
+		song.css({ backgroundColor:'#FCFFCF' });
 	}
 }
 
@@ -218,6 +481,9 @@ $(document).ready(function(){
 		logMessage('Ended event listener fired');
 		getNext(); 
 	});
+	initMediaSessionHandlers();
+	bindMediaSessionAudioEvents();
+	bindLyricsOverlayEvents();
 	
 	// set up rating system
 	$('#repeatButton').on('click', function(e) {
@@ -235,6 +501,9 @@ $(document).ready(function(){
 	$(document).keypress(
 		function(event){
     		if (event.which == '13') {
+				if ($(event.target).closest('#addNewSongForm').length) {
+					return;
+				}
       			event.preventDefault();
    		 	}
 		}
@@ -516,6 +785,258 @@ function loadSongList(params) {
 		}
 	});
 }
+
+function getCurrentFilepath() {
+	let searchParams = new URLSearchParams(window.location.search);
+	let filepath = searchParams.get('filepath') || '';
+	if (!filepath) {
+		return '';
+	}
+	if (/\.(mp3|flac|ogg|wav)$/i.test(filepath)) {
+		filepath = filepath.replace(/\/[^/]+$/, '');
+	}
+	return filepath.replace(/\/+$/, '');
+}
+
+function setAddSongStatus(message, isError) {
+	let status = $('#addSongStatus');
+	status.text(message);
+	status.toggleClass('addSongStatusError', !!isError);
+	status.toggleClass('addSongStatusOk', !isError && !!message);
+}
+
+$(document).on('submit', '#addNewSongForm', function(e) {
+	e.preventDefault();
+	let url = $.trim($('#addSongUrl').val() || '');
+	let filename = $.trim($('#addSongFilename').val() || '');
+	let filepath = getCurrentFilepath();
+	if (!url) {
+		setAddSongStatus('Enter a YouTube URL.', true);
+		return;
+	}
+	if (filename) {
+		if (!/^[a-zA-Z0-9\s._-]+$/.test(filename)) {
+			setAddSongStatus('Filename may only contain letters, numbers, spaces, dashes, underscores, and periods.', true);
+			return;
+		}
+		if (!/\.mp3$/i.test(filename)) {
+			filename += '.mp3';
+			$('#addSongFilename').val(filename);
+		}
+	}
+	if (!filepath) {
+		setAddSongStatus('Open a music folder first so the song has a place to save.', true);
+		return;
+	}
+	let submitButton = $('#addSongSubmit');
+	submitButton.prop('disabled', true);
+	setAddSongStatus('Starting download...', false);
+	$.ajax({
+		url: 'api.php',
+		method: 'POST',
+		dataType: 'json',
+		data: {
+			cmd: 'addNewSong',
+			url: url,
+			filename: filename,
+			filepath: filepath
+		},
+		success: function(msg) {
+			if (msg && msg.success) {
+				setAddSongStatus(msg.msg || 'Download started in the background.', false);
+				$('#addSongUrl').val('');
+				$('#addSongFilename').val('');
+			} else {
+				setAddSongStatus((msg && msg.msg) || 'Could not start the download.', true);
+			}
+		},
+		error: function() {
+			setAddSongStatus('Could not start the download.', true);
+		},
+		complete: function() {
+			submitButton.prop('disabled', false);
+		}
+	});
+});
+
+function setLyricsOverlayStatus(message) {
+	$('#lyricsOverlayStatus').text(message || '');
+	$('#lyricsOverlayText').text('');
+}
+
+function setLyricsButtonLoading(button, isLoading) {
+	if (!button) {
+		return;
+	}
+	let $button = $(button);
+	if (isLoading) {
+		if (!$button.data('lyricsLabel')) {
+			$button.data('lyricsLabel', $button.html());
+		}
+		lyricsActiveButton = button;
+		$button.prop('disabled', true)
+			.addClass('lyricsButtonLoading')
+			.html('<i class="fa fa-spinner fa-spin" aria-hidden="true"></i>');
+		return;
+	}
+	$button.prop('disabled', false)
+		.removeClass('lyricsButtonLoading')
+		.html($button.data('lyricsLabel') || 'L');
+	$button.removeData('lyricsLabel');
+	if (lyricsActiveButton === button) {
+		lyricsActiveButton = null;
+	}
+}
+
+function syncLyricsScroll() {
+	if (!lyricsOverlayOpen || lyricsUserScrolling) {
+		return;
+	}
+	let audio = getAudioElement();
+	let panel = document.getElementById('lyricsOverlayBody');
+	if (!audio || !panel) {
+		return;
+	}
+	let duration = audio.duration;
+	if (!duration || !isFinite(duration) || duration <= 0) {
+		return;
+	}
+	let maxScroll = panel.scrollHeight - panel.clientHeight;
+	if (maxScroll <= 0) {
+		return;
+	}
+	panel.scrollTop = maxScroll * (audio.currentTime / duration);
+}
+
+function pauseLyricsAutoScroll() {
+	lyricsUserScrolling = true;
+	if (lyricsUserScrollTimer) {
+		clearTimeout(lyricsUserScrollTimer);
+	}
+	lyricsUserScrollTimer = setTimeout(function() {
+		lyricsUserScrolling = false;
+		syncLyricsScroll();
+	}, 4000);
+}
+
+function closeLyricsOverlay() {
+	lyricsOverlayOpen = false;
+	lyricsRequestId += 1;
+	lyricsUserScrolling = false;
+	if (lyricsUserScrollTimer) {
+		clearTimeout(lyricsUserScrollTimer);
+		lyricsUserScrollTimer = null;
+	}
+	$('#lyricsOverlay').addClass('displayNone').attr('aria-hidden', 'true');
+	$('html, body').removeClass('lyricsOverlayOpen');
+	$(getAudioElement()).off('timeupdate.lyrics');
+	setLyricsButtonLoading(lyricsActiveButton, false);
+}
+
+function openLyricsOverlay(path, name, button) {
+	let overlay = document.getElementById('lyricsOverlay');
+	if (!overlay) {
+		return;
+	}
+	let requestId = ++lyricsRequestId;
+	lyricsOverlayOpen = true;
+	lyricsUserScrolling = false;
+	lyricsSongPath = path || '';
+	setLyricsButtonLoading(lyricsActiveButton, false);
+	setLyricsButtonLoading(button, true);
+	$('#lyricsOverlayTitle').text(name || 'Lyrics');
+	$('#lyricsOverlayArtist').text(getArtistName({ path: path, name: name }));
+	setLyricsOverlayStatus('Loading lyrics...');
+	$(overlay).removeClass('displayNone').attr('aria-hidden', 'false');
+	$('html, body').addClass('lyricsOverlayOpen');
+	let panel = document.getElementById('lyricsOverlayBody');
+	if (panel) {
+		panel.scrollTop = 0;
+	}
+	$(getAudioElement()).off('timeupdate.lyrics').on('timeupdate.lyrics', syncLyricsScroll);
+	$.ajax({
+		url: 'api.php',
+		method: 'POST',
+		dataType: 'json',
+		data: {
+			cmd: 'getLyrics',
+			path: path || '',
+			name: name || ''
+		},
+		success: function(msg) {
+			if (requestId !== lyricsRequestId) {
+				return;
+			}
+			if (msg && msg.title) {
+				$('#lyricsOverlayTitle').text(msg.title);
+			}
+			if (msg && msg.artist) {
+				$('#lyricsOverlayArtist').text(msg.artist);
+			}
+			if (msg && msg.success && msg.lyrics) {
+				$('#lyricsOverlayStatus').text('');
+				$('#lyricsOverlayText').text(msg.lyrics);
+				syncLyricsScroll();
+				return;
+			}
+			setLyricsOverlayStatus((msg && msg.msg) || 'Could not load lyrics.');
+		},
+		error: function() {
+			if (requestId !== lyricsRequestId) {
+				return;
+			}
+			setLyricsOverlayStatus('Could not load lyrics.');
+		},
+		complete: function() {
+			if (requestId !== lyricsRequestId) {
+				return;
+			}
+			setLyricsButtonLoading(button, false);
+		}
+	});
+}
+
+function bindLyricsOverlayEvents() {
+	let panel = document.getElementById('lyricsOverlayBody');
+	if (!panel || panel.dataset.lyricsBound) {
+		return;
+	}
+	panel.dataset.lyricsBound = '1';
+	panel.addEventListener('touchstart', pauseLyricsAutoScroll, { passive: true });
+	panel.addEventListener('wheel', pauseLyricsAutoScroll, { passive: true });
+}
+
+document.addEventListener('click', function(e) {
+	let button = e.target.closest('.lyricsButton');
+	if (!button) {
+		return;
+	}
+	e.preventDefault();
+	e.stopPropagation();
+	if (button.disabled || button.classList.contains('lyricsButtonLoading')) {
+		return;
+	}
+	let path = button.getAttribute('data-path') || '';
+	let name = button.getAttribute('data-name') || '';
+	let wrap = button.closest('.songWrap');
+	if (wrap) {
+		let info = $(wrap).data('info') || {};
+		path = path || info.path || '';
+		name = name || info.name || '';
+	}
+	openLyricsOverlay(path, name, button);
+}, true);
+
+$(document).on('click', '#lyricsOverlayClose', function(e) {
+	e.preventDefault();
+	closeLyricsOverlay();
+});
+
+$(document).on('keydown', function(e) {
+	if (e.key === 'Escape' && lyricsOverlayOpen) {
+		closeLyricsOverlay();
+	}
+});
 
 function applyDarkMode(isEnabled) {
 	$('body').toggleClass('dark-mode', isEnabled);

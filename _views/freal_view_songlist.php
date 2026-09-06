@@ -42,6 +42,7 @@ if (count($this->songList)) {
 								</div>
 								<?php } else { ?>
 								<div class="songActions" onclick="event.stopPropagation()">
+									<button type="button" class="lyricsButton" data-path="<?= htmlspecialchars((string)$song['path'], ENT_QUOTES, 'UTF-8'); ?>" data-name="<?= htmlspecialchars((string)$song['name'], ENT_QUOTES, 'UTF-8'); ?>" aria-label="Show lyrics">L</button>
 									<?php if (!$mobile) { ?>
 										<span class="fa fa-clipboard board" onclick="navigator.clipboard.writeText('https://www.tacofever.com<?= $song['path']; ?>')"></span></button>
 									<?php } else {

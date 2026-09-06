@@ -192,6 +192,21 @@ color:white;
       </div>
       <div id="abLoopStatus" class="abLoopStatus"></div>
     </div>
+    <div class="settingsRow">
+      <div class="d-flex justify-content-between align-items-center addSongToggle" data-bs-toggle="collapse" data-bs-target="#addNewSongCollapse" role="button" aria-expanded="false" aria-controls="addNewSongCollapse">
+        <span>Add New Song</span>
+        <i class="fa fa-chevron-down addSongChevron"></i>
+      </div>
+      <div class="collapse mt-3" id="addNewSongCollapse">
+        <form id="addNewSongForm">
+          <input type="url" class="form-control mb-2" id="addSongUrl" placeholder="YouTube URL" required>
+          <input type="text" class="form-control mb-2" id="addSongFilename" placeholder="Optional filename (must end in .mp3)" autocomplete="off">
+          <button type="submit" class="btn btn-primary w-100" id="addSongSubmit">Add Song</button>
+          <div id="addSongStatus" class="addSongStatus mt-2"></div>
+        </form>
+        <a href="extract.php" class="btn btn-primary w-100 mt-3" id="downloadPlaylistButton">Download Playlist</a>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -300,7 +315,18 @@ color:white;
 	<div class="debughandle">DEBUG</div>
 	<div class="debug">
 	
-	</debug>
+	</div>
+</div>
+<div id="lyricsOverlay" class="lyricsOverlay displayNone" aria-hidden="true">
+	<button type="button" class="lyricsOverlayClose" id="lyricsOverlayClose" aria-label="Close lyrics">X</button>
+	<div class="lyricsOverlayHeader">
+		<div id="lyricsOverlayTitle"></div>
+		<div id="lyricsOverlayArtist"></div>
+	</div>
+	<div id="lyricsOverlayBody" class="lyricsOverlayBody">
+		<div id="lyricsOverlayStatus"></div>
+		<div id="lyricsOverlayText"></div>
+	</div>
 </div>
 <script>
 
