@@ -60,6 +60,31 @@ margin-top:8px;
 min-height:14px;
 color:#666;
 }
+.addSongToggle {
+color:inherit;
+text-decoration:none;
+cursor:pointer;
+}
+.addSongToggle:hover {
+color:inherit;
+}
+.addSongChevron {
+transition:transform 0.2s ease;
+}
+.addSongToggle[aria-expanded="true"] .addSongChevron {
+transform:rotate(180deg);
+}
+.addSongStatus {
+font-size:12px;
+line-height:1.3;
+min-height:16px;
+}
+.addSongStatusError {
+color:#C00;
+}
+.addSongStatusOk {
+color:#0A0;
+}
 @media (min-width: 768px) {
 .settingsCogButton {
 margin-right:40px;
@@ -154,10 +179,120 @@ margin-left:auto;
 display:flex;
 justify-content:flex-end;
 align-items:flex-start;
+gap:8px;
 min-width:48px;
 }
 .songActions .playlistIcon {
 padding-top:0;
+}
+.lyricsButton {
+width:40px;
+height:40px;
+border-radius:50%;
+border:0;
+background-color:#ddd;
+color:#111;
+font:bold 20px verdana, arial;
+cursor:pointer;
+padding:0;
+line-height:40px;
+text-align:center;
+flex-shrink:0;
+}
+.lyricsButton .fa {
+color:inherit;
+}
+.lyricsButton.lyricsButtonLoading,
+.lyricsButton:disabled {
+opacity:1;
+}
+.searchSong {
+display:flex;
+align-items:flex-start;
+justify-content:space-between;
+gap:10px;
+padding-right:12px;
+}
+.searchSongMain {
+flex:1 1 auto;
+min-width:0;
+cursor:pointer;
+}
+.lyricsOverlay {
+position:fixed;
+top:0;
+left:0;
+width:100vw;
+height:100vh;
+height:100dvh;
+z-index:2000;
+background-color:#111;
+color:#f3f3f3;
+display:flex;
+flex-direction:column;
+}
+.lyricsOverlayClose {
+position:absolute;
+top:calc(8px + env(safe-area-inset-top, 0px));
+right:calc(8px + env(safe-area-inset-right, 0px));
+width:44px;
+height:44px;
+border:0;
+border-radius:50%;
+background-color:#333;
+color:#fff;
+font:bold 22px verdana, arial;
+line-height:44px;
+padding:0;
+cursor:pointer;
+z-index:2001;
+}
+.lyricsOverlayHeader {
+padding:18px 64px 10px 20px;
+padding-top:calc(18px + env(safe-area-inset-top, 0px));
+text-align:center;
+}
+#lyricsOverlayTitle {
+font:bold 22px verdana, arial;
+line-height:1.2;
+}
+#lyricsOverlayArtist {
+font:normal 14px verdana, arial;
+margin-top:4px;
+opacity:0.8;
+}
+.lyricsOverlayBody {
+flex:1 1 auto;
+overflow-y:auto;
+-webkit-overflow-scrolling:touch;
+padding:10px 20px calc(40vh + env(safe-area-inset-bottom, 0px)) 20px;
+text-align:center;
+}
+#lyricsOverlayStatus {
+font:italic 16px verdana, arial;
+line-height:1.4;
+}
+#lyricsOverlayText {
+font:normal 20px/1.5 verdana, arial;
+white-space:pre-wrap;
+word-break:break-word;
+text-align:center;
+}
+html.lyricsOverlayOpen,
+body.lyricsOverlayOpen {
+overflow:hidden;
+height:100%;
+}
+@media (min-width: 768px) {
+.lyricsOverlay {
+left:50%;
+width:50vw;
+}
+html.lyricsOverlayOpen,
+body.lyricsOverlayOpen {
+overflow:auto;
+height:auto;
+}
 }
 .songBottomRow {
 width:100%;
@@ -178,7 +313,7 @@ word-break:break-all;
 	color:#DDD;
 }
 .searchBand, .searchSong {
-	padding:20px 0px 3px 20px;
+	padding:20px 12px 3px 20px;
 }
 
 
@@ -265,6 +400,12 @@ body.dark-mode .abLoopButton.active {
 body.dark-mode .abLoopStatus {
 	color: #bbb;
 }
+body.dark-mode .addSongStatusError {
+	color: #f66;
+}
+body.dark-mode .addSongStatusOk {
+	color: #6c6;
+}
 body.dark-mode input,
 body.dark-mode select,
 body.dark-mode textarea,
@@ -273,12 +414,71 @@ body.dark-mode button {
 	color: #ddd;
 	border-color: #aaa;
 }
+body.dark-mode button.lyricsButton {
+	background-color: #fff;
+	color: #333;
+	border: 0;
+}
+body.dark-mode button.lyricsButton .fa {
+	color: #333;
+}
 body.dark-mode a {
 	color: #ddd;
+}
+body.dark-mode a.btn {
+	background-color: #4a4a4a;
+	color: #ddd;
+	border-color: #aaa;
 }
 body.dark-mode .btn-close {
 	filter: invert(1);
 }
+
+.displayNone {
+	display: none !important;
+}
+.red {
+	color: #C00;
+}
+.green {
+	color: #0C0;
+}
+body.extractPage header {
+	position: static;
+	padding: 16px 0 8px 0;
+}
+body.extractPage #wrapper {
+	max-width: 720px;
+	padding-bottom: 40px;
+}
+.extractTopBar {
+	margin-bottom: 8px;
+}
+.extractBack {
+	font-size: 16px;
+	text-decoration: none;
+}
+.extractForm {
+	padding: 10px 0 20px 0;
+}
+#confirmImage img {
+	max-width: 160px;
+	height: auto;
+	border: 1px solid #999;
+}
+body.dark-mode #confirmImage img {
+	border-color: #666;
+}
+body.dark-mode .red {
+	color: #f66;
+}
+body.dark-mode .green {
+	color: #6c6;
+}
+html.dark-mode {
+	background-color: #333;
+}
+
 
 
 
