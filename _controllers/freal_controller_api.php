@@ -32,6 +32,16 @@ class FrealApi
 			$this->getLyrics();
 			return;
 		}
+
+		if (($_REQUEST['cmd'] ?? false) == 'deleteLyricsCache') {
+			$this->deleteLyricsCache();
+			return;
+		}
+
+		if (($_REQUEST['cmd'] ?? false) == 'getAlbumArt') {
+			$this->getAlbumArt();
+			return;
+		}
 		
 		if (isset($_REQUEST['cmd']) && method_exists($this, $_REQUEST['cmd'])) {
 			$this->{$_REQUEST['cmd']}();
@@ -234,6 +244,87 @@ class FrealApi
 		echo json_encode($response);
 	}
 
+	private function getAlbumArt() {
+		$path = rawurldecode(trim((string)($_REQUEST['path'] ?? '')));
+		$art = $this->findAlbumArt($path);
+		$raw = isset($_REQUEST['raw']) && (string)$_REQUEST['raw'] === '1';
+		if ($raw) {
+			if ($art === '' || !is_file($art)) {
+				http_response_code(404);
+				return;
+			}
+			header('Content-Type: image/jpeg');
+			header('Content-Length: ' . filesize($art));
+			header('Cache-Control: public, max-age=86400');
+			header('Access-Control-Allow-Origin: *');
+			readfile($art);
+			return;
+		}
+		echo json_encode([
+			'success' => $art !== '',
+			'path' => $art
+		]);
+	}
+
+	private function findAlbumArt($songPath) {
+		$musicRoot = realpath('/hdd3/music');
+		if ($musicRoot === false) {
+			return '';
+		}
+		$path = (string)$songPath;
+		if ($path === '') {
+			return '';
+		}
+		if (is_file($path) || preg_match('/\.(mp3|flac|ogg|wav)$/i', $path)) {
+			$start = dirname($path);
+		} else {
+			$start = $path;
+		}
+		$dir = realpath($start);
+		if ($dir === false) {
+			return '';
+		}
+		$rootPrefix = $musicRoot . DIRECTORY_SEPARATOR;
+		if ($dir !== $musicRoot && strpos($dir, $rootPrefix) !== 0) {
+			return '';
+		}
+		while ($dir !== $musicRoot) {
+			$jpg = $this->firstJpegInDir($dir);
+			if ($jpg !== '') {
+				return $jpg;
+			}
+			$parent = dirname($dir);
+			if ($parent === $dir) {
+				break;
+			}
+			if ($parent !== $musicRoot && strpos($parent, $rootPrefix) !== 0) {
+				break;
+			}
+			$dir = $parent;
+		}
+		return '';
+	}
+
+	private function firstJpegInDir($dir) {
+		$entries = @scandir($dir);
+		if (!is_array($entries)) {
+			return '';
+		}
+		foreach ($entries as $entry) {
+			if ($entry === '' || $entry[0] === '.') {
+				continue;
+			}
+			if (!preg_match('/\.(jpe?g)$/i', $entry)) {
+				continue;
+			}
+			$file = $dir . '/' . $entry;
+			if (is_file($file) && filesize($file) > 0) {
+				return $file;
+			}
+		}
+		return '';
+	}
+
 	private function getLyrics() {
 		$response = [
 			'success' => false,
@@ -245,9 +336,12 @@ class FrealApi
 		$path = rawurldecode(trim((string)($_REQUEST['path'] ?? '')));
 		$name = trim((string)($_REQUEST['name'] ?? ''));
 		$artist = $this->artistFromPath($path);
+		if ($this->isGenericArtist($artist)) {
+			$artist = '';
+		}
 		$title = $this->cleanSongTitle($name !== '' ? $name : $this->titleFromPath($path));
 		$response['title'] = $title;
-		$response['artist'] = $artist !== '' ? $artist : 'FrealPlayer';
+		$response['artist'] = $artist;
 
 		$cached = $this->lyricsCacheGet($path, $artist, $title);
 		if ($cached) {
@@ -261,7 +355,7 @@ class FrealApi
 			echo json_encode($response);
 			return;
 		}
-		$query = trim($artist . ' ' . $title);
+		$query = $artist !== '' ? trim($artist . ' ' . $title) : $title;
 		if ($query === '') {
 			$response['msg'] = 'Not enough song info to search lyrics.';
 			echo json_encode($response);
@@ -305,6 +399,76 @@ class FrealApi
 		$response['lyrics'] = $lyrics;
 		$this->lyricsCacheSet($path, $response);
 		echo json_encode($response);
+	}
+
+	private function deleteLyricsCache() {
+		$response = ['success' => false];
+		$path = rawurldecode(trim((string)($_REQUEST['path'] ?? '')));
+		$name = trim((string)($_REQUEST['name'] ?? ''));
+		$folderArtist = $this->artistFromPath($path);
+		$artist = $this->isGenericArtist($folderArtist) ? '' : $folderArtist;
+		$title = $this->cleanSongTitle($name !== '' ? $name : $this->titleFromPath($path));
+		$db = $this->lyricsCacheDb();
+		if (!$db) {
+			$response['msg'] = 'Lyrics cache is not available.';
+			echo json_encode($response);
+			return;
+		}
+		$keys = array_values(array_unique(array_filter([
+			$this->lyricsCacheKey($artist, $title),
+			$this->lyricsCacheKey($folderArtist, $title)
+		], function($key) {
+			return $key !== '|';
+		})));
+		if (!$this->lyricsCacheDeleteRows($path, $keys)) {
+			$response['msg'] = 'Could not remove lyrics from cache.';
+			echo json_encode($response);
+			return;
+		}
+
+		$response['success'] = true;
+		$response['msg'] = 'Lyrics removed from cache.';
+		echo json_encode($response);
+	}
+
+	private function lyricsCacheDeleteRows($path, $keys = []) {
+		$db = $this->lyricsCacheDb();
+		if (!$db) {
+			return false;
+		}
+		$keys = array_values(array_filter((array)$keys, function($key) {
+			return $key && $key !== '|';
+		}));
+		try {
+			if ($db instanceof PDO) {
+				if ($path !== '') {
+					$stmt = $db->prepare('DELETE FROM lyrics_cache WHERE path = :path');
+					$stmt->execute([':path' => $path]);
+				}
+				if ($keys) {
+					$placeholders = implode(',', array_fill(0, count($keys), '?'));
+					$stmt = $db->prepare('DELETE FROM lyrics_cache WHERE cache_key IN (' . $placeholders . ')');
+					$stmt->execute($keys);
+				}
+				$stmt = $db->prepare("DELETE FROM lyrics_cache WHERE lyrics = '__BLOCKED__' OR url = 'blocked'");
+				$stmt->execute();
+			} else if ($db instanceof SQLite3) {
+				if ($path !== '') {
+					$stmt = $db->prepare('DELETE FROM lyrics_cache WHERE path = :path');
+					$stmt->bindValue(':path', $path, SQLITE3_TEXT);
+					$stmt->execute();
+				}
+				foreach ($keys as $key) {
+					$stmt = $db->prepare('DELETE FROM lyrics_cache WHERE cache_key = :key');
+					$stmt->bindValue(':key', $key, SQLITE3_TEXT);
+					$stmt->execute();
+				}
+				$db->exec("DELETE FROM lyrics_cache WHERE lyrics = '__BLOCKED__' OR url = 'blocked'");
+			}
+			return true;
+		} catch (Exception $e) {
+			return false;
+		}
 	}
 
 	private function lyricsCacheDir() {
@@ -410,7 +574,14 @@ class FrealApi
 		} catch (Exception $e) {
 			return null;
 		}
-		if (!$row || trim((string)($row['lyrics'] ?? '')) === '') {
+		if (!$row) {
+			return null;
+		}
+		if (($row['url'] ?? '') === 'blocked' || ($row['lyrics'] ?? '') === '__BLOCKED__') {
+			$this->lyricsCacheDeleteRows($path, [$this->lyricsCacheKey($artist, $title)]);
+			return null;
+		}
+		if (trim((string)($row['lyrics'] ?? '')) === '') {
 			return null;
 		}
 		return [
@@ -468,6 +639,20 @@ class FrealApi
 		return '';
 	}
 
+	private function isGenericArtist($artist) {
+		$value = strtolower(trim((string)$artist));
+		$value = preg_replace('/[^a-z0-9]+/', '', $value);
+		return in_array($value, [
+			'various',
+			'variousartists',
+			'va',
+			'compilation',
+			'compilations',
+			'soundtrack',
+			'soundtracks'
+		], true);
+	}
+
 	private function titleFromPath($path) {
 		return pathinfo((string)$path, PATHINFO_FILENAME);
 	}
@@ -501,7 +686,9 @@ class FrealApi
 			$hitTitle = $result['title'] ?? '';
 			$hitArtist = $result['primary_artist']['name'] ?? '';
 			$score = 0;
-			if ($this->artistNamesMatch($artist, $hitArtist)) {
+			if ($artist !== '' && $this->artistNamesMatch($artist, $hitArtist)) {
+				$score += 5;
+			} else if ($artist === '' && $hitArtist !== '' && stripos($title, $hitArtist) !== false) {
 				$score += 5;
 			}
 			if (strcasecmp($hitTitle, $title) === 0) {

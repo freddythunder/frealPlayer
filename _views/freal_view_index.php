@@ -207,6 +207,7 @@ color:white;
         <a href="extract.php" class="btn btn-primary w-100 mt-3" id="downloadPlaylistButton">Download Playlist</a>
       </div>
     </div>
+    <div id="jsVersionStamp" class="jsVersionStamp"></div>
   </div>
 </div>
 
@@ -318,6 +319,7 @@ color:white;
 	</div>
 </div>
 <div id="lyricsOverlay" class="lyricsOverlay displayNone" aria-hidden="true">
+	<button type="button" class="lyricsOverlayDelete displayNone" id="lyricsOverlayDelete" aria-label="Remove lyrics from cache"><i class="fa fa-trash" aria-hidden="true"></i></button>
 	<button type="button" class="lyricsOverlayClose" id="lyricsOverlayClose" aria-label="Close lyrics">X</button>
 	<div class="lyricsOverlayHeader">
 		<div id="lyricsOverlayTitle"></div>
@@ -325,6 +327,7 @@ color:white;
 	</div>
 	<div id="lyricsOverlayBody" class="lyricsOverlayBody">
 		<div id="lyricsOverlayStatus"></div>
+		<button type="button" class="btn btn-primary lyricsOverlayRetry displayNone" id="lyricsOverlayRetry">Try again</button>
 		<div id="lyricsOverlayText"></div>
 	</div>
 </div>

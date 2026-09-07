@@ -85,6 +85,18 @@ color:#C00;
 .addSongStatusOk {
 color:#0A0;
 }
+#settingsOffcanvas .offcanvas-body {
+display:flex;
+flex-direction:column;
+}
+.jsVersionStamp {
+margin-top:auto;
+padding-top:24px;
+font-size:11px;
+line-height:1.3;
+opacity:0.55;
+text-align:center;
+}
 @media (min-width: 768px) {
 .settingsCogButton {
 margin-right:40px;
@@ -247,8 +259,24 @@ padding:0;
 cursor:pointer;
 z-index:2001;
 }
+.lyricsOverlayDelete {
+position:absolute;
+top:calc(8px + env(safe-area-inset-top, 0px));
+left:calc(8px + env(safe-area-inset-left, 0px));
+width:44px;
+height:44px;
+border:0;
+border-radius:50%;
+background-color:#333;
+color:#fff;
+font-size:18px;
+line-height:44px;
+padding:0;
+cursor:pointer;
+z-index:2001;
+}
 .lyricsOverlayHeader {
-padding:18px 64px 10px 20px;
+padding:18px 64px 10px 64px;
 padding-top:calc(18px + env(safe-area-inset-top, 0px));
 text-align:center;
 }
@@ -271,6 +299,9 @@ text-align:center;
 #lyricsOverlayStatus {
 font:italic 16px verdana, arial;
 line-height:1.4;
+}
+.lyricsOverlayRetry {
+margin:16px auto 0 auto;
 }
 #lyricsOverlayText {
 font:normal 20px/1.5 verdana, arial;
@@ -415,7 +446,7 @@ body.dark-mode button {
 	border-color: #aaa;
 }
 body.dark-mode button.lyricsButton {
-	background-color: #fff;
+	background-color: #ddd;
 	color: #333;
 	border: 0;
 }
@@ -430,8 +461,11 @@ body.dark-mode a.btn {
 	color: #ddd;
 	border-color: #aaa;
 }
-body.dark-mode .btn-close {
-	filter: invert(1);
+body.dark-mode .lyricsOverlayClose,
+body.dark-mode .lyricsOverlayDelete {
+	background-color: #333;
+	color: #fff;
+	border-color: transparent;
 }
 
 .displayNone {

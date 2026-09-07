@@ -1,4 +1,5 @@
 /* freal player controls */
+var frealPlayerSavedAt = '2026-09-07 2:57 PM';
 
 var songId = 0;
 var server = window.location.host;
@@ -15,6 +16,7 @@ var lyricsUserScrolling = false;
 var lyricsUserScrollTimer = null;
 var lyricsRequestId = 0;
 var lyricsSongPath = '';
+var lyricsSongName = '';
 var lyricsActiveButton = null;
 
 function getAudioElement() {
@@ -80,17 +82,11 @@ function getFolderName(songPath) {
 	return folderPath.split('/').pop() || '';
 }
 
-function getAlbumArtPath(songPath) {
+function getAlbumArtUrl(songPath) {
 	if (!songPath) {
 		return '';
 	}
-	let folderPath = songPath.replace(/\/[^/]+$/, '');
-	let folderName = getFolderName(songPath);
-	let imageName = folderName.replace(/ /g, '');
-	if (!imageName) {
-		return '';
-	}
-	return folderPath + '/' + imageName + '.jpg';
+	return new URL('api.php?cmd=getAlbumArt&raw=1&path=' + encodeURIComponent(songPath), window.location.href).href;
 }
 
 function getAlbumName(data) {
@@ -122,33 +118,90 @@ function getArtistName(data) {
 
 function getAbsoluteUrl(path) {
 	if (!path) {
-		return new URL('favicon.ico', window.location.href).href;
+		return '';
 	}
 	if (/^https?:\/\//i.test(path)) {
 		return path;
 	}
-	return new URL(path, window.location.origin).href;
+	return new URL(path, window.location.href).href;
+}
+
+function getVisibleSongs() {
+	let songs = [];
+	$('.songWrap').each(function() {
+		let info = $(this).data('info');
+		if (info && info.id != null && info.name) {
+			songs.push(info);
+		}
+	});
+	return songs;
+}
+
+function mediaSessionArtwork(artworkSrc) {
+	if (!artworkSrc) {
+		return [];
+	}
+	let artworkUrl = getAbsoluteUrl(artworkSrc);
+	return [
+		{ src: artworkUrl, sizes: '96x96', type: 'image/jpeg' },
+		{ src: artworkUrl, sizes: '128x128', type: 'image/jpeg' },
+		{ src: artworkUrl, sizes: '192x192', type: 'image/jpeg' },
+		{ src: artworkUrl, sizes: '256x256', type: 'image/jpeg' },
+		{ src: artworkUrl, sizes: '384x384', type: 'image/jpeg' },
+		{ src: artworkUrl, sizes: '512x512', type: 'image/jpeg' }
+	];
+}
+
+function songListChapterInfo(artwork) {
+	return getVisibleSongs().slice(0, 80).map(function(song) {
+		let chapter = {
+			title: song.id + '. ' + song.name,
+			startTime: 1000000 + Number(song.id)
+		};
+		if (artwork && artwork.length) {
+			chapter.artwork = artwork;
+		}
+		return chapter;
+	});
+}
+
+function playSongFromChapterSeek(seekTime) {
+	if (typeof seekTime !== 'number' || seekTime < 1000000) {
+		return false;
+	}
+	let id = Math.round(seekTime - 1000000);
+	if (!id || !$('#song' + id).length) {
+		return false;
+	}
+	getSong(id);
+	return true;
 }
 
 function updateMediaSession(data, artworkSrc) {
 	if (!('mediaSession' in navigator) || typeof MediaMetadata === 'undefined' || !data) {
 		return;
 	}
-	let artworkUrl = getAbsoluteUrl(artworkSrc);
-	let artworkType = artworkSrc ? 'image/jpeg' : 'image/x-icon';
-	navigator.mediaSession.metadata = new MediaMetadata({
+	let artwork = mediaSessionArtwork(artworkSrc);
+	let metadata = {
 		title: data.name || '',
 		artist: getArtistName(data),
-		album: getAlbumName(data),
-		artwork: [
-			{ src: artworkUrl, sizes: '96x96', type: artworkType },
-			{ src: artworkUrl, sizes: '128x128', type: artworkType },
-			{ src: artworkUrl, sizes: '192x192', type: artworkType },
-			{ src: artworkUrl, sizes: '256x256', type: artworkType },
-			{ src: artworkUrl, sizes: '384x384', type: artworkType },
-			{ src: artworkUrl, sizes: '512x512', type: artworkType }
-		]
-	});
+		album: getAlbumName(data)
+	};
+	if (artwork.length) {
+		metadata.artwork = artwork;
+	}
+	let chapters = songListChapterInfo(artwork);
+	if (chapters.length) {
+		metadata.chapterInfo = chapters;
+	}
+	try {
+		navigator.mediaSession.metadata = new MediaMetadata(metadata);
+	} catch (e) {
+		delete metadata.chapterInfo;
+		try {
+			navigator.mediaSession.metadata = new MediaMetadata(metadata);
+		} catch (err) {}
+	}
 }
 
 function resetMediaPositionState() {
@@ -225,6 +278,9 @@ function initMediaSessionHandlers() {
 		getNext();
 	});
 	bindMediaSessionAction('seekto', function(details) {
+		if (details && playSongFromChapterSeek(details.seekTime)) {
+			return;
+		}
 		let audio = getAudioElement();
 		if (details && details.fastSeek && audio.fastSeek) {
 			audio.fastSeek(details.seekTime);
@@ -247,6 +303,13 @@ function initMediaSessionHandlers() {
 		}
 		audio.currentTime = nextTime;
 		updateMediaPositionState(true);
+	});
+	bindMediaSessionAction('stop', function() {
+		let audio = getAudioElement();
+		audio.pause();
+		audio.currentTime = 0;
+		setMediaPlaybackState('none');
+		resetMediaPositionState();
 	});
 }
 
@@ -282,31 +345,59 @@ function bindMediaSessionAudioEvents() {
 	});
 }
 
+function setPageIcon(imageUrl) {
+	let href = imageUrl || new URL('favicon.ico', window.location.href).href;
+	let type = imageUrl ? 'image/jpeg' : 'image/x-icon';
+	document.querySelectorAll('link[rel="icon"], link[rel="shortcut icon"], link[rel="apple-touch-icon"]').forEach(function(link) {
+		if (link.parentNode) {
+			link.parentNode.removeChild(link);
+		}
+	});
+	[
+		{ rel: 'icon' },
+		{ rel: 'shortcut icon' },
+		{ rel: 'apple-touch-icon', sizes: '180x180' },
+		{ rel: 'apple-touch-icon', sizes: '192x192' }
+	].forEach(function(spec) {
+		let link = document.createElement('link');
+		link.rel = spec.rel;
+		link.type = type;
+		link.href = href;
+		if (spec.sizes) {
+			link.setAttribute('sizes', spec.sizes);
+		}
+		document.head.appendChild(link);
+	});
+}
+
 function setNowPlayingArtwork(songPath) {
 	let art = $('#nowPlayingArt');
 	let requestId = ++artworkRequestId;
-	let imagePath = getAlbumArtPath(songPath);
+	let imagePath = getAlbumArtUrl(songPath);
+	art.off('load error');
+	art.addClass('displayNone').attr('src', '');
 	if (!imagePath) {
-		art.addClass('displayNone').attr('src', '');
+		setPageIcon('');
 		updateMediaSession(currentSongData, '');
 		return;
 	}
-	art.off('load error');
 	art.on('load', function() {
 		if (requestId !== artworkRequestId) {
 			return;
 		}
 		art.removeClass('displayNone');
+		setPageIcon(imagePath);
 		updateMediaSession(currentSongData, imagePath);
 	});
 	art.on('error', function() {
 		if (requestId !== artworkRequestId) {
 			return;
 		}
-		art.addClass('displayNone');
+		art.addClass('displayNone').attr('src', '');
+		setPageIcon('');
 		updateMediaSession(currentSongData, '');
 	});
-	art.attr('src', imagePath + '?cache=' + (new Date().getMilliseconds()));
+	art.attr('src', imagePath);
 }
 
 function getSong(id){
@@ -473,6 +564,7 @@ function renderBreadcrumbs() {
 
 $(document).ready(function(){
 	initDarkMode();
+	$('#jsVersionStamp').text(frealPlayerSavedAt ? 'JS ' + frealPlayerSavedAt : '');
 
 	getPlaylists();
 
@@ -782,6 +874,10 @@ function loadSongList(params) {
 			window.history.replaceState({}, '', nextUrl);
 			renderBreadcrumbs();
 			scrollToSelectedSong();
+			if (currentSongData) {
+				let art = $('#nowPlayingArt');
+				updateMediaSession(currentSongData, art.hasClass('displayNone') ? '' : art.attr('src'));
+			}
 		}
 	});
 }
@@ -859,9 +955,75 @@ $(document).on('submit', '#addNewSongForm', function(e) {
 	});
 });
 
+function setLyricsDeleteVisible(show) {
+	$('#lyricsOverlayDelete').toggleClass('displayNone', !show);
+}
+
+function setLyricsRetryVisible(show) {
+	$('#lyricsOverlayRetry').toggleClass('displayNone', !show);
+}
+
 function setLyricsOverlayStatus(message) {
 	$('#lyricsOverlayStatus').text(message || '');
 	$('#lyricsOverlayText').text('');
+}
+
+function loadLyricsForOverlay(path, name, button) {
+	let requestId = ++lyricsRequestId;
+	setLyricsRetryVisible(false);
+	setLyricsDeleteVisible(false);
+	setLyricsOverlayStatus('Loading lyrics...');
+	if (button) {
+		setLyricsButtonLoading(button, true);
+	}
+	$.ajax({
+		url: 'api.php',
+		method: 'POST',
+		dataType: 'json',
+		data: {
+			cmd: 'getLyrics',
+			path: path || '',
+			name: name || ''
+		},
+		success: function(msg) {
+			if (requestId !== lyricsRequestId) {
+				return;
+			}
+			if (msg && msg.title) {
+				$('#lyricsOverlayTitle').text(msg.title);
+			}
+			if (msg && msg.artist) {
+				$('#lyricsOverlayArtist').text(msg.artist);
+			}
+			if (msg && msg.success && msg.lyrics) {
+				$('#lyricsOverlayStatus').text('');
+				$('#lyricsOverlayText').text(msg.lyrics);
+				setLyricsRetryVisible(false);
+				setLyricsDeleteVisible(true);
+				syncLyricsScroll();
+				return;
+			}
+			setLyricsDeleteVisible(false);
+			setLyricsRetryVisible(true);
+			setLyricsOverlayStatus((msg && msg.msg) || 'Could not load lyrics.');
+		},
+		error: function() {
+			if (requestId !== lyricsRequestId) {
+				return;
+			}
+			setLyricsDeleteVisible(false);
+			setLyricsRetryVisible(true);
+			setLyricsOverlayStatus('Could not load lyrics.');
+		},
+		complete: function() {
+			if (requestId !== lyricsRequestId) {
+				return;
+			}
+			if (button) {
+				setLyricsButtonLoading(button, false);
+			}
+		}
+	});
 }
 
 function setLyricsButtonLoading(button, isLoading) {
@@ -931,6 +1093,8 @@ function closeLyricsOverlay() {
 	$('html, body').removeClass('lyricsOverlayOpen');
 	$(getAudioElement()).off('timeupdate.lyrics');
 	setLyricsButtonLoading(lyricsActiveButton, false);
+	setLyricsDeleteVisible(false);
+	setLyricsRetryVisible(false);
 }
 
 function openLyricsOverlay(path, name, button) {
@@ -938,15 +1102,13 @@ function openLyricsOverlay(path, name, button) {
 	if (!overlay) {
 		return;
 	}
-	let requestId = ++lyricsRequestId;
 	lyricsOverlayOpen = true;
 	lyricsUserScrolling = false;
 	lyricsSongPath = path || '';
+	lyricsSongName = name || '';
 	setLyricsButtonLoading(lyricsActiveButton, false);
-	setLyricsButtonLoading(button, true);
 	$('#lyricsOverlayTitle').text(name || 'Lyrics');
 	$('#lyricsOverlayArtist').text(getArtistName({ path: path, name: name }));
-	setLyricsOverlayStatus('Loading lyrics...');
 	$(overlay).removeClass('displayNone').attr('aria-hidden', 'false');
 	$('html, body').addClass('lyricsOverlayOpen');
 	let panel = document.getElementById('lyricsOverlayBody');
@@ -954,46 +1116,7 @@ function openLyricsOverlay(path, name, button) {
 		panel.scrollTop = 0;
 	}
 	$(getAudioElement()).off('timeupdate.lyrics').on('timeupdate.lyrics', syncLyricsScroll);
-	$.ajax({
-		url: 'api.php',
-		method: 'POST',
-		dataType: 'json',
-		data: {
-			cmd: 'getLyrics',
-			path: path || '',
-			name: name || ''
-		},
-		success: function(msg) {
-			if (requestId !== lyricsRequestId) {
-				return;
-			}
-			if (msg && msg.title) {
-				$('#lyricsOverlayTitle').text(msg.title);
-			}
-			if (msg && msg.artist) {
-				$('#lyricsOverlayArtist').text(msg.artist);
-			}
-			if (msg && msg.success && msg.lyrics) {
-				$('#lyricsOverlayStatus').text('');
-				$('#lyricsOverlayText').text(msg.lyrics);
-				syncLyricsScroll();
-				return;
-			}
-			setLyricsOverlayStatus((msg && msg.msg) || 'Could not load lyrics.');
-		},
-		error: function() {
-			if (requestId !== lyricsRequestId) {
-				return;
-			}
-			setLyricsOverlayStatus('Could not load lyrics.');
-		},
-		complete: function() {
-			if (requestId !== lyricsRequestId) {
-				return;
-			}
-			setLyricsButtonLoading(button, false);
-		}
-	});
+	loadLyricsForOverlay(path, name, button);
 }
 
 function bindLyricsOverlayEvents() {
@@ -1030,6 +1153,48 @@ document.addEventListener('click', function(e) {
 $(document).on('click', '#lyricsOverlayClose', function(e) {
 	e.preventDefault();
 	closeLyricsOverlay();
+});
+
+$(document).on('click', '#lyricsOverlayRetry', function(e) {
+	e.preventDefault();
+	loadLyricsForOverlay(lyricsSongPath, lyricsSongName, null);
+});
+
+$(document).on('click', '#lyricsOverlayDelete', function(e) {
+	e.preventDefault();
+	if (!lyricsSongPath && !lyricsSongName) {
+		return;
+	}
+	if (!window.confirm('Remove these lyrics from the cache?')) {
+		return;
+	}
+	let deleteButton = $(this);
+	deleteButton.prop('disabled', true);
+	$.ajax({
+		url: 'api.php',
+		method: 'POST',
+		dataType: 'json',
+		data: {
+			cmd: 'deleteLyricsCache',
+			path: lyricsSongPath,
+			name: lyricsSongName
+		},
+		success: function(msg) {
+			if (msg && msg.success) {
+				setLyricsDeleteVisible(false);
+				setLyricsRetryVisible(true);
+				setLyricsOverlayStatus(msg.msg || 'Lyrics removed from cache.');
+				return;
+			}
+			setLyricsOverlayStatus((msg && msg.msg) || 'Could not remove lyrics from cache.');
+		},
+		error: function() {
+			setLyricsOverlayStatus('Could not remove lyrics from cache.');
+		},
+		complete: function() {
+			deleteButton.prop('disabled', false);
+		}
+	});
 });
 
 $(document).on('keydown', function(e) {
