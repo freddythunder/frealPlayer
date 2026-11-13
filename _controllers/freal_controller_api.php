@@ -17,6 +17,7 @@ class FrealApi
 		// get bootstrap
 		require_once('_copy/bootstrap.php');
 		require_once('_models/freal_model_playlist.php');
+		require_once('_models/freal_model_history.php');
 		// connect to database
 		$this->bs = new Bootstrap();
 		$this->dbi = $this->bs->dbi;
@@ -62,6 +63,28 @@ class FrealApi
 	private function removeFromPlaylist() {
 		$this->playlist->removeFromPlaylist($_REQUEST['name']);
 		echo json_encode(['success' => true]);
+	}
+
+	private function logPlay() {
+		$history = new PlayHistory();
+		$ok = $history->log(
+			$_REQUEST['path'] ?? '',
+			$this->clientIp(),
+			$_SERVER['HTTP_USER_AGENT'] ?? ''
+		);
+		echo json_encode(['success' => $ok]);
+	}
+
+	private function clientIp() {
+		$forwarded = trim((string)($_SERVER['HTTP_X_FORWARDED_FOR'] ?? ''));
+		if ($forwarded !== '') {
+			$first = trim(explode(',', $forwarded)[0]);
+			if (filter_var($first, FILTER_VALIDATE_IP)) {
+				return $first;
+			}
+		}
+		$remote = trim((string)($_SERVER['REMOTE_ADDR'] ?? ''));
+		return filter_var($remote, FILTER_VALIDATE_IP) ? $remote : '';
 	}
 	
 	public function doSearch() {
@@ -245,33 +268,98 @@ class FrealApi
 	}
 
 	private function getAlbumArt() {
+		if (session_status() === PHP_SESSION_ACTIVE) {
+			session_write_close();
+		}
 		$path = rawurldecode(trim((string)($_REQUEST['path'] ?? '')));
 		$art = $this->findAlbumArt($path);
+		$embedded = null;
+		if ($art === '') {
+			$embedded = $this->readEmbeddedArt($path);
+		}
 		$raw = isset($_REQUEST['raw']) && (string)$_REQUEST['raw'] === '1';
 		if ($raw) {
-			if ($art === '' || !is_file($art)) {
-				http_response_code(404);
+			if ($art !== '' && is_file($art)) {
+				$this->sendImageFile($art);
 				return;
 			}
-			header('Content-Type: image/jpeg');
-			header('Content-Length: ' . filesize($art));
-			header('Cache-Control: public, max-age=86400');
-			header('Access-Control-Allow-Origin: *');
-			readfile($art);
+			if ($embedded) {
+				$this->sendImageBytes($embedded['mime'], $embedded['data']);
+				return;
+			}
+			http_response_code(404);
 			return;
 		}
 		echo json_encode([
-			'success' => $art !== '',
+			'success' => $art !== '' || $embedded !== null,
 			'path' => $art
 		]);
 	}
 
-	private function findAlbumArt($songPath) {
-		$musicRoot = realpath('/hdd3/music');
-		if ($musicRoot === false) {
-			return '';
+	private function sendImageFile($file) {
+		$this->sendImageHeaders($this->imageContentType($file), filesize($file));
+		readfile($file);
+	}
+
+	private function sendImageBytes($mime, $data) {
+		$this->sendImageHeaders($mime, strlen($data));
+		echo $data;
+	}
+
+	private function sendImageHeaders($mime, $length) {
+		header('Content-Type: ' . $mime);
+		header('Content-Length: ' . $length);
+		header('Cache-Control: public, max-age=86400');
+		header('Access-Control-Allow-Origin: *');
+	}
+
+	private function imageContentType($file) {
+		$ext = strtolower(pathinfo((string)$file, PATHINFO_EXTENSION));
+		if ($ext === 'png') {
+			return 'image/png';
 		}
+		if ($ext === 'gif') {
+			return 'image/gif';
+		}
+		if ($ext === 'webp') {
+			return 'image/webp';
+		}
+		return 'image/jpeg';
+	}
+
+	private function localMediaPath($songPath) {
 		$path = (string)$songPath;
+		if (strpos($path, '/repo/') === 0) {
+			$path = '/hdd' . $path;
+		}
+		return $path;
+	}
+
+	private function allowedMediaRoots() {
+		$roots = [];
+		foreach (['/hdd3/music', '/hdd/repo'] as $root) {
+			$real = realpath($root);
+			if ($real !== false) {
+				$roots[] = $real;
+			}
+		}
+		return $roots;
+	}
+
+	private function pathIsAllowed($real) {
+		if ($real === false || $real === '') {
+			return false;
+		}
+		foreach ($this->allowedMediaRoots() as $root) {
+			if ($real === $root || strpos($real, $root . DIRECTORY_SEPARATOR) === 0) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private function findAlbumArt($songPath) {
+		$path = $this->localMediaPath($songPath);
 		if ($path === '') {
 			return '';
 		}
@@ -281,23 +369,22 @@ class FrealApi
 			$start = $path;
 		}
 		$dir = realpath($start);
-		if ($dir === false) {
+		if (!$this->pathIsAllowed($dir)) {
 			return '';
 		}
-		$rootPrefix = $musicRoot . DIRECTORY_SEPARATOR;
-		if ($dir !== $musicRoot && strpos($dir, $rootPrefix) !== 0) {
-			return '';
-		}
-		while ($dir !== $musicRoot) {
-			$jpg = $this->firstJpegInDir($dir);
-			if ($jpg !== '') {
-				return $jpg;
+		$roots = $this->allowedMediaRoots();
+		while ($this->pathIsAllowed($dir)) {
+			if (!in_array($dir, $roots, true)) {
+				$image = $this->firstImageInDir($dir);
+				if ($image !== '') {
+					return $image;
+				}
+			}
+			if (in_array($dir, $roots, true)) {
+				break;
 			}
 			$parent = dirname($dir);
 			if ($parent === $dir) {
-				break;
-			}
-			if ($parent !== $musicRoot && strpos($parent, $rootPrefix) !== 0) {
 				break;
 			}
 			$dir = $parent;
@@ -305,7 +392,7 @@ class FrealApi
 		return '';
 	}
 
-	private function firstJpegInDir($dir) {
+	private function firstImageInDir($dir) {
 		$entries = @scandir($dir);
 		if (!is_array($entries)) {
 			return '';
@@ -314,7 +401,7 @@ class FrealApi
 			if ($entry === '' || $entry[0] === '.') {
 				continue;
 			}
-			if (!preg_match('/\.(jpe?g)$/i', $entry)) {
+			if (!preg_match('/\.(jpe?g|png|gif|webp)$/i', $entry)) {
 				continue;
 			}
 			$file = $dir . '/' . $entry;
@@ -323,6 +410,300 @@ class FrealApi
 			}
 		}
 		return '';
+	}
+
+	private function readEmbeddedArt($songPath) {
+		$path = $this->localMediaPath($songPath);
+		$real = realpath($path);
+		if (!$this->pathIsAllowed($real) || !is_file($real)) {
+			return null;
+		}
+		$ext = strtolower(pathinfo($real, PATHINFO_EXTENSION));
+		if ($ext === 'flac') {
+			return $this->readFlacPicture($real);
+		}
+		if ($ext === 'mp3') {
+			return $this->readMp3Picture($real);
+		}
+		return null;
+	}
+
+	private function readFlacPicture($path) {
+		$fh = fopen($path, 'rb');
+		if (!$fh) {
+			return null;
+		}
+		if (fread($fh, 4) !== 'fLaC') {
+			fclose($fh);
+			return null;
+		}
+		$picture = null;
+		while (!feof($fh)) {
+			$hdr = fread($fh, 4);
+			if (strlen($hdr) < 4) {
+				break;
+			}
+			$info = ord($hdr[0]);
+			$last = ($info & 0x80) !== 0;
+			$type = $info & 0x7F;
+			$len = (ord($hdr[1]) << 16) | (ord($hdr[2]) << 8) | ord($hdr[3]);
+			if ($len < 0 || $len > 8000000) {
+				break;
+			}
+			if ($type === 6 && $len > 0) {
+				$block = fread($fh, $len);
+				$parsed = $this->parseFlacPictureBlock($block);
+				if ($parsed && ($picture === null || (int)$parsed['type'] === 3)) {
+					$picture = $parsed;
+				}
+				if ($picture && (int)$picture['type'] === 3) {
+					break;
+				}
+			} else if ($len > 0 && fseek($fh, $len, SEEK_CUR) !== 0) {
+				break;
+			}
+			if ($last) {
+				break;
+			}
+		}
+		fclose($fh);
+		return $picture;
+	}
+
+	private function parseFlacPictureBlock($block) {
+		$length = strlen($block);
+		if ($length < 32) {
+			return null;
+		}
+		$offset = 0;
+		$type = $this->readBe32($block, $offset);
+		$offset += 4;
+		$mimeLen = $this->readBe32($block, $offset);
+		$offset += 4;
+		if ($mimeLen < 0 || $mimeLen > 128 || $offset + $mimeLen > $length) {
+			return null;
+		}
+		$mime = substr($block, $offset, $mimeLen);
+		$offset += $mimeLen;
+		$descLen = $this->readBe32($block, $offset);
+		$offset += 4;
+		if ($descLen < 0 || $offset + $descLen + 20 > $length) {
+			return null;
+		}
+		$offset += $descLen + 16;
+		$dataLen = $this->readBe32($block, $offset);
+		$offset += 4;
+		if ($dataLen <= 0 || $offset + $dataLen > $length) {
+			return null;
+		}
+		$data = substr($block, $offset, $dataLen);
+		$mime = $this->normalizeImageMime($mime, $data);
+		if ($mime === '') {
+			return null;
+		}
+		return [
+			'mime' => $mime,
+			'data' => $data,
+			'type' => $type
+		];
+	}
+
+	private function readMp3Picture($path) {
+		$fh = fopen($path, 'rb');
+		if (!$fh) {
+			return null;
+		}
+		$head = fread($fh, 10);
+		if (strlen($head) < 10 || substr($head, 0, 3) !== 'ID3') {
+			fclose($fh);
+			return null;
+		}
+		$version = ord($head[3]);
+		if ((ord($head[5]) & 0x80) !== 0) {
+			fclose($fh);
+			return null;
+		}
+		$end = 10 + $this->readSynchsafe($head, 6);
+		$picture = null;
+		if ($version === 2) {
+			while (ftell($fh) + 6 <= $end) {
+				$id = fread($fh, 3);
+				$sizeBytes = fread($fh, 3);
+				if (strlen($id) < 3 || $id === "\0\0\0") {
+					break;
+				}
+				$frameSize = (ord($sizeBytes[0]) << 16) | (ord($sizeBytes[1]) << 8) | ord($sizeBytes[2]);
+				if ($frameSize <= 0 || ftell($fh) + $frameSize > $end) {
+					break;
+				}
+				if ($id === 'PIC') {
+					$picture = $this->parsePicFrame(fread($fh, $frameSize));
+					break;
+				}
+				fseek($fh, $frameSize, SEEK_CUR);
+			}
+		} else if ($version === 3 || $version === 4) {
+			while (ftell($fh) + 10 <= $end) {
+				$id = fread($fh, 4);
+				$sizeBytes = fread($fh, 4);
+				fread($fh, 2);
+				if (strlen($id) < 4 || $id === "\0\0\0\0") {
+					break;
+				}
+				$frameSize = $version === 4 ? $this->readSynchsafe($sizeBytes, 0) : $this->readBe32($sizeBytes, 0);
+				if ($frameSize <= 0 || ftell($fh) + $frameSize > $end) {
+					break;
+				}
+				if ($id === 'APIC') {
+					$parsed = $this->parseApicFrame(fread($fh, $frameSize));
+					if ($parsed && ($picture === null || (int)$parsed['type'] === 3)) {
+						$picture = $parsed;
+					}
+					if ($picture && (int)$picture['type'] === 3) {
+						break;
+					}
+					continue;
+				}
+				fseek($fh, $frameSize, SEEK_CUR);
+			}
+		}
+		fclose($fh);
+		return $picture;
+	}
+
+	private function parseApicFrame($frame) {
+		$length = strlen($frame);
+		if ($length < 4) {
+			return null;
+		}
+		$encoding = ord($frame[0]);
+		$mimeEnd = strpos($frame, "\0", 1);
+		if ($mimeEnd === false) {
+			return null;
+		}
+		$mime = substr($frame, 1, $mimeEnd - 1);
+		$offset = $mimeEnd + 1;
+		if ($offset >= $length) {
+			return null;
+		}
+		$type = ord($frame[$offset]);
+		$offset++;
+		if ($encoding === 1 || $encoding === 2) {
+			$term = $this->utf16Terminator($frame, $offset);
+			if ($term === false) {
+				return null;
+			}
+			$offset = $term + 2;
+		} else {
+			$term = strpos($frame, "\0", $offset);
+			if ($term === false) {
+				return null;
+			}
+			$offset = $term + 1;
+		}
+		if ($offset >= $length) {
+			return null;
+		}
+		$data = substr($frame, $offset);
+		$mime = $this->normalizeImageMime($mime, $data);
+		if ($mime === '') {
+			return null;
+		}
+		return [
+			'mime' => $mime,
+			'data' => $data,
+			'type' => $type
+		];
+	}
+
+	private function parsePicFrame($frame) {
+		$length = strlen($frame);
+		if ($length < 6) {
+			return null;
+		}
+		$encoding = ord($frame[0]);
+		$format = strtoupper(substr($frame, 1, 3));
+		$type = ord($frame[4]);
+		$offset = 5;
+		if ($encoding === 1 || $encoding === 2) {
+			$term = $this->utf16Terminator($frame, $offset);
+			if ($term === false) {
+				return null;
+			}
+			$offset = $term + 2;
+		} else {
+			$term = strpos($frame, "\0", $offset);
+			if ($term === false) {
+				return null;
+			}
+			$offset = $term + 1;
+		}
+		if ($offset >= $length) {
+			return null;
+		}
+		$data = substr($frame, $offset);
+		$mime = $format === 'PNG' ? 'image/png' : 'image/jpeg';
+		$mime = $this->normalizeImageMime($mime, $data);
+		if ($mime === '') {
+			return null;
+		}
+		return [
+			'mime' => $mime,
+			'data' => $data,
+			'type' => $type
+		];
+	}
+
+	private function utf16Terminator($frame, $offset) {
+		$term = strpos($frame, "\0\0", $offset);
+		if ($term === false) {
+			return false;
+		}
+		if ((($term - $offset) % 2) === 1) {
+			$term = strpos($frame, "\0\0", $term + 1);
+		}
+		return $term;
+	}
+
+	private function normalizeImageMime($mime, $data) {
+		$mime = strtolower(trim((string)$mime));
+		if ($mime === 'image/jpg') {
+			$mime = 'image/jpeg';
+		}
+		if (!in_array($mime, ['image/jpeg', 'image/png', 'image/gif', 'image/webp'], true)) {
+			$mime = $this->sniffImageMime($data);
+		}
+		if ($mime === '' || $this->sniffImageMime($data) === '') {
+			return '';
+		}
+		return $mime;
+	}
+
+	private function sniffImageMime($data) {
+		if (strncmp($data, "\xFF\xD8\xFF", 3) === 0) {
+			return 'image/jpeg';
+		}
+		if (strncmp($data, "\x89PNG\r\n\x1a\n", 8) === 0) {
+			return 'image/png';
+		}
+		if (strncmp($data, 'GIF8', 4) === 0) {
+			return 'image/gif';
+		}
+		if (strlen($data) >= 12 && strncmp($data, 'RIFF', 4) === 0 && substr($data, 8, 4) === 'WEBP') {
+			return 'image/webp';
+		}
+		return '';
+	}
+
+	private function readBe32($bytes, $offset) {
+		return (ord($bytes[$offset]) << 24) | (ord($bytes[$offset + 1]) << 16) | (ord($bytes[$offset + 2]) << 8) | ord($bytes[$offset + 3]);
+	}
+
+	private function readSynchsafe($bytes, $offset) {
+		return ((ord($bytes[$offset]) & 0x7F) << 21)
+			| ((ord($bytes[$offset + 1]) & 0x7F) << 14)
+			| ((ord($bytes[$offset + 2]) & 0x7F) << 7)
+			| (ord($bytes[$offset + 3]) & 0x7F);
 	}
 
 	private function getLyrics() {
@@ -340,12 +721,28 @@ class FrealApi
 			$artist = '';
 		}
 		$title = $this->cleanSongTitle($name !== '' ? $name : $this->titleFromPath($path));
+		$title = $this->stripArtistPrefix($title, $artist);
 		$response['title'] = $title;
 		$response['artist'] = $artist;
+		$defaultQuery = $artist !== '' ? trim($artist . ' ' . $title) : $title;
+		$requestedQuery = trim((string)($_REQUEST['query'] ?? ''));
+		$query = $requestedQuery !== '' ? $requestedQuery : $defaultQuery;
+		$response['query'] = $query;
+		$revisedQuery = $this->normalizeQueryKey($query) !== $this->normalizeQueryKey($defaultQuery);
 
-		$cached = $this->lyricsCacheGet($path, $artist, $title);
+		$cacheOnly = !empty($_REQUEST['cacheOnly']);
+		$cached = $revisedQuery
+			? $this->lyricsCacheGetByQuery($query)
+			: $this->lyricsCacheGet($path, $artist, $title);
 		if ($cached) {
+			$cached['query'] = $query;
+			$cached['cached'] = true;
 			echo json_encode($cached);
+			return;
+		}
+		if ($cacheOnly) {
+			$response['cached'] = false;
+			echo json_encode($response);
 			return;
 		}
 
@@ -355,7 +752,6 @@ class FrealApi
 			echo json_encode($response);
 			return;
 		}
-		$query = $artist !== '' ? trim($artist . ' ' . $title) : $title;
 		if ($query === '') {
 			$response['msg'] = 'Not enough song info to search lyrics.';
 			echo json_encode($response);
@@ -371,7 +767,7 @@ class FrealApi
 		);
 		$search = json_decode($searchJson, true);
 		$hits = $search['response']['hits'] ?? [];
-		$best = $this->pickGeniusHit($hits, $artist, $title);
+		$best = $revisedQuery ? $this->firstGeniusSongHit($hits) : $this->pickGeniusHit($hits, $artist, $title);
 		if (!$best) {
 			$response['msg'] = 'No lyrics match found.';
 			echo json_encode($response);
@@ -387,8 +783,11 @@ class FrealApi
 			return;
 		}
 
-		$pageHtml = $this->httpGet($response['url']);
-		$lyrics = $this->extractGeniusLyrics($pageHtml);
+		$lyrics = $this->lookupLrclibLyrics($response['artist'], $response['title']);
+		if ($lyrics === '') {
+			$pageHtml = $this->httpGet($response['url']);
+			$lyrics = $this->extractGeniusLyrics($pageHtml);
+		}
 		if ($lyrics === '') {
 			$response['msg'] = 'Found the song, but could not load the lyrics.';
 			echo json_encode($response);
@@ -397,7 +796,13 @@ class FrealApi
 
 		$response['success'] = true;
 		$response['lyrics'] = $lyrics;
-		$this->lyricsCacheSet($path, $response);
+		$response['query'] = $query;
+		if ($revisedQuery) {
+			$this->lyricsCacheDeleteRows($path, []);
+			$this->lyricsCacheSet($path, $response, $query);
+		} else {
+			$this->lyricsCacheSet($path, $response);
+		}
 		echo json_encode($response);
 	}
 
@@ -488,6 +893,28 @@ class FrealApi
 		return '';
 	}
 
+	private function lyricsCacheGetByQuery($query) {
+		$key = 'q:' . $this->normalizeQueryKey($query);
+		if ($key === 'q:') {
+			return null;
+		}
+		return $this->lyricsCacheGet('', '', '', $key);
+	}
+
+	private function normalizeQueryKey($query) {
+		$value = strtolower(trim((string)$query));
+		return preg_replace('/[^a-z0-9]+/', '', $value);
+	}
+
+	private function firstGeniusSongHit($hits) {
+		foreach ($hits as $hit) {
+			if (($hit['type'] ?? '') === 'song' && !empty($hit['result'])) {
+				return $hit['result'];
+			}
+		}
+		return null;
+	}
+
 	private function lyricsCacheKey($artist, $title) {
 		$normalize = function($value) {
 			$value = strtolower(trim((string)$value));
@@ -538,12 +965,12 @@ class FrealApi
 		return $db;
 	}
 
-	private function lyricsCacheGet($path, $artist, $title) {
+	private function lyricsCacheGet($path, $artist, $title, $keyOverride = null) {
 		$db = $this->lyricsCacheDb();
 		if (!$db) {
 			return null;
 		}
-		$key = $this->lyricsCacheKey($artist, $title);
+		$key = $keyOverride !== null ? $keyOverride : $this->lyricsCacheKey($artist, $title);
 		$row = null;
 		try {
 			if ($db instanceof PDO) {
@@ -593,12 +1020,14 @@ class FrealApi
 		];
 	}
 
-	private function lyricsCacheSet($path, $response) {
+	private function lyricsCacheSet($path, $response, $queryKey = null) {
 		$db = $this->lyricsCacheDb();
 		if (!$db || empty($response['lyrics'])) {
 			return;
 		}
-		$key = $this->lyricsCacheKey($response['artist'] ?? '', $response['title'] ?? '');
+		$key = $queryKey !== null
+			? 'q:' . $this->normalizeQueryKey($queryKey)
+			: $this->lyricsCacheKey($response['artist'] ?? '', $response['title'] ?? '');
 		if ($key === '|') {
 			return;
 		}
@@ -658,9 +1087,57 @@ class FrealApi
 	}
 
 	private function cleanSongTitle($title) {
+		$title = rawurldecode(trim((string)$title));
+		$previous = '';
+		while ($title !== $previous) {
+			$previous = $title;
+			$title = preg_replace('/^\d+[\s.\-_]+/', '', $title);
+			$title = trim((string)$title);
+		}
+		$title = $this->stripEncapsulatedExtras($title);
+		$title = preg_replace('/\s+/', ' ', $title);
+		return trim((string)$title, " \t-–—");
+	}
+
+	private function stripArtistPrefix($title, $artist) {
 		$title = trim((string)$title);
-		$title = preg_replace('/^\d+[\s.\-_]+/', '', $title);
-		return trim((string)$title);
+		$artist = trim((string)$artist);
+		if ($title === '' || $artist === '') {
+			return $title;
+		}
+		$stripped = preg_replace('/^' . preg_quote($artist, '/') . '\s*[-–—]\s+/iu', '', $title);
+		return trim((string)$stripped);
+	}
+
+	private function stripEncapsulatedExtras($title) {
+		$patterns = [
+			'/\([^()]*\)/u',
+			'/\[[^\[\]]*\]/u',
+			'/\{[^{}]*\}/u',
+			'/（[^（）]*）/u',
+			'/［[^［］]*］/u',
+			'/【[^【】]*】/u',
+		];
+		$changed = true;
+		while ($changed) {
+			$changed = false;
+			foreach ($patterns as $pattern) {
+				if (!preg_match($pattern, $title)) {
+					continue;
+				}
+				$stripped = trim(preg_replace('/\s+/', ' ', preg_replace($pattern, ' ', $title)));
+				if ($stripped !== '') {
+					$title = $stripped;
+					$changed = true;
+					continue;
+				}
+				if (preg_match('/^(?:\(|\[|\{|（|［|【)\s*(.*?)\s*(?:\)|\]|\}|）|］|】)$/u', $title, $matches)) {
+					$title = trim($matches[1]);
+					$changed = true;
+				}
+			}
+		}
+		return trim(preg_replace('/\s+/', ' ', $title));
 	}
 
 	private function artistNamesMatch($a, $b) {
@@ -704,6 +1181,94 @@ class FrealApi
 		return $best;
 	}
 
+	private function lookupLrclibLyrics($artist, $title) {
+		$artist = trim((string)$artist);
+		$title = $this->cleanSongTitle($title);
+		if ($title === '') {
+			return '';
+		}
+		$headers = [
+			'Accept: application/json',
+			'User-Agent: frealPlayer/1.0 (personal lyrics lookup)'
+		];
+		if ($artist !== '') {
+			$directUrl = 'https://lrclib.net/api/get?artist_name=' . rawurlencode($artist)
+				. '&track_name=' . rawurlencode($title);
+			$direct = json_decode($this->httpGet($directUrl, $headers), true);
+			$lyrics = $this->lrclibLyricsFromSong($direct, $artist, $title);
+			if ($lyrics !== '') {
+				return $lyrics;
+			}
+		}
+		$query = trim($artist . ' ' . $title);
+		$rows = json_decode($this->httpGet('https://lrclib.net/api/search?q=' . rawurlencode($query), $headers), true);
+		if (!is_array($rows)) {
+			return '';
+		}
+		$bestLyrics = '';
+		$bestScore = 0;
+		foreach ($rows as $row) {
+			if (!is_array($row)) {
+				continue;
+			}
+			$score = $this->scoreLrclibRow($row, $artist, $title);
+			$lyrics = $this->lrclibLyricsFromSong($row, $artist, $title, false);
+			if ($lyrics === '' || $score < $bestScore) {
+				continue;
+			}
+			if ($score > $bestScore || strlen($lyrics) > strlen($bestLyrics)) {
+				$bestScore = $score;
+				$bestLyrics = $lyrics;
+			}
+		}
+		$minScore = $artist !== '' ? 8 : 6;
+		return $bestScore >= $minScore ? $bestLyrics : '';
+	}
+
+	private function lrclibLyricsFromSong($song, $artist, $title, $requireMatch = true) {
+		if (!is_array($song) || !empty($song['instrumental'])) {
+			return '';
+		}
+		if ($requireMatch && $this->scoreLrclibRow($song, $artist, $title) < ($artist !== '' ? 8 : 6)) {
+			return '';
+		}
+		$plain = trim((string)($song['plainLyrics'] ?? ''));
+		if ($plain !== '') {
+			return $plain;
+		}
+		$synced = trim((string)($song['syncedLyrics'] ?? ''));
+		if ($synced === '') {
+			return '';
+		}
+		$lines = preg_split("/\r\n|\n|\r/", $synced);
+		$plainLines = [];
+		foreach ($lines as $line) {
+			$plainLines[] = preg_replace('/^\[\d{1,2}:\d{2}(?:\.\d{1,3})?\]\s*/', '', $line);
+		}
+		return trim(implode("\n", $plainLines));
+	}
+
+	private function scoreLrclibRow($row, $artist, $title) {
+		$normalize = function($value) {
+			$value = strtolower(trim((string)$value));
+			$value = preg_replace('/^the\s+/', '', $value);
+			return preg_replace('/[^a-z0-9]+/', '', $value);
+		};
+		$hitTitle = $normalize($row['trackName'] ?? '');
+		$wantTitle = $normalize($title);
+		$score = 0;
+		$hitArtist = (string)($row['artistName'] ?? '');
+		if ($artist !== '' && $this->artistNamesMatch($artist, $hitArtist)) {
+			$score += 5;
+		}
+		if ($wantTitle !== '' && $hitTitle === $wantTitle) {
+			$score += 6;
+		} else if ($wantTitle !== '' && $hitTitle !== '' && (strpos($hitTitle, $wantTitle) !== false || strpos($wantTitle, $hitTitle) !== false)) {
+			$score += 3;
+		}
+		return $score;
+	}
+
 	private function extractGeniusLyrics($html) {
 		$html = (string)$html;
 		if ($html === '') {
@@ -742,7 +1307,14 @@ class FrealApi
 		$defaultHeaders = [
 			'User-Agent: Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'
 		];
-		$allHeaders = array_merge($defaultHeaders, $headers);
+		$hasUserAgent = false;
+		foreach ($headers as $header) {
+			if (stripos($header, 'User-Agent:') === 0) {
+				$hasUserAgent = true;
+				break;
+			}
+		}
+		$allHeaders = $hasUserAgent ? $headers : array_merge($defaultHeaders, $headers);
 		if (function_exists('curl_init')) {
 			$ch = curl_init($url);
 			curl_setopt_array($ch, [

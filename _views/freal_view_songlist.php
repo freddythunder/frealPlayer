@@ -12,7 +12,7 @@ if (count($this->songList)) {
 						@$thumb = str_replace(basename($song['path']), "", $song['path'])
 							. str_replace(" ", "", array_pop(array_filter(explode("/", str_replace(basename($song['path']), "", $song['path']))))) . '.jpg';
 						if (file_exists($thumb)) { ?>
-						<img src="<?= $thumb; ?>" width="62">
+						<img src="<?= str_replace(['[', ']'], ['%5B', '%5D'], $thumb); ?>" width="62">
 						<?php } ?>
 					</div>
 					<div class="flex-fill p-1 songContent" onClick="getSong(<?=$song['id'];?>)">
@@ -76,7 +76,7 @@ if (count($this->songList)) {
 					<?php
 					$thumb = $song['path'] . '/' . str_replace(" ", "", basename($song['name'])) . '.jpg';
 					if (file_exists($thumb)) { ?>
-					<img src="<?= $thumb; ?>" width="62">
+					<img src="<?= str_replace(['[', ']'], ['%5B', '%5D'], $thumb); ?>" width="62">
 					<?php } ?>
 				</div>
 				<div class="flex-fill p-1">

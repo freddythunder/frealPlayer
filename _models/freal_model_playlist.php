@@ -48,7 +48,12 @@ class Playlist {
 	}
 	
 	public function savePlaylist($args=null) {
-		if (trim($args['playlistName'])) {
+		$name = trim((string)($args['name'] ?? ''));
+		$path = trim((string)($args['path'] ?? ''));
+		if ($name === '' || $path === '') {
+			return ['success' => false, 'msg' => 'Missing song name or path'];
+		}
+		if (trim($args['playlistName'] ?? '')) {
 			// entering new playlist name
 			$query = "INSERT INTO frealPlayer_playlists 
 				(parentId, name) VALUES (0,'" . $this->clean($args['playlistName']) . "')";
@@ -59,14 +64,18 @@ class Playlist {
 				error_log($e->getMessage());
 			}
 		} else {
-			$playlistId = $args['playlistSelect'];
+			$playlistId = (int)$args['playlistSelect'];
+		}
+		if (empty($playlistId)) {
+			return ['success' => false, 'msg' => 'Choose a playlist'];
 		}
 		$query = "INSERT INTO frealPlayer_playlists (parentId, name, path) VALUES 
-				(" . $playlistId . ", '" . $this->clean($args['name']) . "','" . $args['path'] . "')";
+				(" . (int)$playlistId . ", '" . $this->clean($name) . "','" . $this->clean($path) . "')";
 		try {
 			$stmt = $this->db->query($query) or die ('no query '. $this->db->error. chr(10).$query);
 		} catch(Exception $e){
 			error_log($e->getMessage());
+			return ['success' => false, 'msg' => 'Could not save the song'];
 		}
 		return ['success' => true];
 		

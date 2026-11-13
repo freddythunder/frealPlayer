@@ -105,7 +105,29 @@ class StockAudio
 		}
 		$path = rtrim($path, '/');
 		$isFileRequest = is_file($path);
-		$files = $isFileRequest ? [$path] : glob($path . '/*.{flac,mp3,ogg,wav}', GLOB_BRACE);
+		$files = [];
+		$dirs = [];
+		if ($isFileRequest) {
+			$files = [$path];
+		} else {
+			// glob() treats [] as a character class, so album folders like
+			// "Music Bank [Disc 1]" match nothing. scandir does not.
+			$entries = @scandir($path);
+			if (is_array($entries)) {
+				$audioExt = ['flac' => true, 'mp3' => true, 'ogg' => true, 'wav' => true];
+				foreach ($entries as $entry) {
+					if ($entry === '' || $entry[0] === '.') {
+						continue;
+					}
+					$full = $path . '/' . $entry;
+					if (is_dir($full)) {
+						$dirs[] = $full;
+					} elseif (is_file($full) && isset($audioExt[strtolower(pathinfo($entry, PATHINFO_EXTENSION))])) {
+						$files[] = $full;
+					}
+				}
+			}
+		}
 
 		foreach ($files as $file) {
 			$results[] = [
@@ -129,7 +151,6 @@ class StockAudio
 			];
 		}
 		
-		$dirs = $isFileRequest ? [] : glob($path . '/*', GLOB_ONLYDIR);
 		foreach ($dirs as $file) {
 			$results[] = [
 				'id' => ++$i,
