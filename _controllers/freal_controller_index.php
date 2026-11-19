@@ -106,6 +106,7 @@ class Freal
 					'source' => $playlistSong['path'],
 					'path' => $playlistSong['path'],
 					'name' => $playlistSong['name'],
+					'length' => $this->stockAudioModel->durationForPath($playlistSong['path']),
 					'type' => 'song'
 				];
 			}
@@ -122,8 +123,9 @@ class Freal
 			$this->songList = $this->stockAudioModel->getAudioList($source, $name, $genre, $rating, $order);
 			$this->firstRun = true;
 
-			// gather browse by band
-			$this->browseHTML = '';
+			// gather browse by band in directory order; shuffle only when the setting is on
+			$browseItems = [];
+			$homeOrder = 0;
 			exec('find /hdd3/music -type d -maxdepth 1', $directories);
 			foreach ($directories as $dir) {
 				if (in_array($dir, ['/hdd3/music'])) {
@@ -133,13 +135,17 @@ class Freal
 				$result = [];
 				exec($cmd, $result); // or die (chr(10) . 'no exec ' . $cmd);
 				if (count($result) && filesize($result[0]) > 0) {
-					$this->browseHTML .= '<div class="browse_wrapper" data-dir="' . $dir . '">';
+					$item = '<div class="browse_wrapper" data-dir="' . $dir . '" data-home-order="' . $homeOrder . '">';
 					$img = '<img src="' . $result[0] . '" class="browse_thumb">';
-					$this->browseHTML .= $img . '<br><small>' . basename($dir) . '</small></div>';
-					
+					$item .= $img . '<br><small>' . basename($dir) . '</small></div>';
+					$browseItems[] = $item;
+					$homeOrder++;
 				}
 			}
-			$this->browseHTML .= '<br clear="all">';
+			if (($_COOKIE['frealPlayerRandomizeHomepage'] ?? '') === '1') {
+				shuffle($browseItems);
+			}
+			$this->browseHTML = implode('', $browseItems) . '<br clear="all">';
 		}
 
 		if (isset($_REQUEST['ajax']) && (string)$_REQUEST['ajax'] === '1') {

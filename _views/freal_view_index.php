@@ -171,6 +171,12 @@ color:white;
       </div>
     </div>
     <div class="d-flex justify-content-between align-items-center settingsRow">
+      <span>Randomize Homepage</span>
+      <div class="form-check form-switch m-0">
+        <input class="form-check-input" type="checkbox" role="switch" id="randomizeHomepageToggle" <?= (($_COOKIE['frealPlayerRandomizeHomepage'] ?? '') === '1') ? 'checked' : ''; ?>>
+      </div>
+    </div>
+    <div class="d-flex justify-content-between align-items-center settingsRow">
       <span>Motorcycle Mode</span>
       <div class="form-check form-switch m-0">
         <input class="form-check-input" type="checkbox" role="switch" id="motorcycleModeToggle" <?= ($_SESSION['motomode'] ?? null) ? 'checked' : ''; ?>>
@@ -207,6 +213,9 @@ color:white;
         <a href="extract.php" class="btn btn-primary w-100 mt-3" id="downloadPlaylistButton">Download Playlist</a>
       </div>
     </div>
+    <div class="settingsRow">
+      <a href="history.php" class="historyLink">Play History</a>
+    </div>
     <div id="jsVersionStamp" class="jsVersionStamp"></div>
   </div>
 </div>
@@ -228,7 +237,7 @@ color:white;
 	</div>
 </div>
 <div id="nowPlayingMeta" class="d-flex align-items-center">
-	<img src="" id="nowPlayingArt" class="displayNone" alt="Album art">
+	<img id="nowPlayingArt" class="displayNone" alt="Album art">
 	<div class="nowPlayingText">
 		<div id="songplaying"></div>
 		<div id="breadcrumbs"></div>
@@ -324,6 +333,10 @@ color:white;
 	<div class="lyricsOverlayHeader">
 		<div id="lyricsOverlayTitle"></div>
 		<div id="lyricsOverlayArtist"></div>
+		<form id="lyricsQueryForm" class="lyricsQueryForm">
+			<input type="text" id="lyricsQueryInput" autocomplete="off" enterkeyhint="search" aria-label="Lyrics search">
+			<button type="submit" class="btn btn-primary" id="lyricsQuerySubmit">Search</button>
+		</form>
 	</div>
 	<div id="lyricsOverlayBody" class="lyricsOverlayBody">
 		<div id="lyricsOverlayStatus"></div>

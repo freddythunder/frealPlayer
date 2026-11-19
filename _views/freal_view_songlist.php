@@ -12,7 +12,7 @@ if (count($this->songList)) {
 						@$thumb = str_replace(basename($song['path']), "", $song['path'])
 							. str_replace(" ", "", array_pop(array_filter(explode("/", str_replace(basename($song['path']), "", $song['path']))))) . '.jpg';
 						if (file_exists($thumb)) { ?>
-						<img src="<?= $thumb; ?>" width="62">
+						<img src="<?= str_replace(['[', ']'], ['%5B', '%5D'], $thumb); ?>" width="62">
 						<?php } ?>
 					</div>
 					<div class="flex-fill p-1 songContent" onClick="getSong(<?=$song['id'];?>)">
@@ -56,10 +56,13 @@ if (count($this->songList)) {
 								<?php } ?>
 							</div>
 							<div class="songBottomRow">
-								<span class="source songPath"><?=$song['path'] ?? $song['artist'];?> <?= $song['album'] ? ' :: ' . $song['album'] : ''; ?></span>
+								<span class="source songDuration"><?= htmlspecialchars((string)($song['length'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span>
 							</div>
 						</div>
 					</div>
+				</div>
+				<div class="songPathRow" onClick="getSong(<?=$song['id'];?>)">
+					<span class="source songPath"><?=$song['path'] ?? $song['artist'];?> <?= $song['album'] ? ' :: ' . $song['album'] : ''; ?></span>
 				</div>
 			</div>
 		<?php } else if (($song['type'] ?? null) === 'directory') {
@@ -76,7 +79,7 @@ if (count($this->songList)) {
 					<?php
 					$thumb = $song['path'] . '/' . str_replace(" ", "", basename($song['name'])) . '.jpg';
 					if (file_exists($thumb)) { ?>
-					<img src="<?= $thumb; ?>" width="62">
+					<img src="<?= str_replace(['[', ']'], ['%5B', '%5D'], $thumb); ?>" width="62">
 					<?php } ?>
 				</div>
 				<div class="flex-fill p-1">

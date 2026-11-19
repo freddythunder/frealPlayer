@@ -105,7 +105,29 @@ class StockAudio
 		}
 		$path = rtrim($path, '/');
 		$isFileRequest = is_file($path);
-		$files = $isFileRequest ? [$path] : glob($path . '/*.{flac,mp3,ogg,wav}', GLOB_BRACE);
+		$files = [];
+		$dirs = [];
+		if ($isFileRequest) {
+			$files = [$path];
+		} else {
+			// glob() treats [] as a character class, so album folders like
+			// "Music Bank [Disc 1]" match nothing. scandir does not.
+			$entries = @scandir($path);
+			if (is_array($entries)) {
+				$audioExt = ['flac' => true, 'mp3' => true, 'ogg' => true, 'wav' => true];
+				foreach ($entries as $entry) {
+					if ($entry === '' || $entry[0] === '.') {
+						continue;
+					}
+					$full = $path . '/' . $entry;
+					if (is_dir($full)) {
+						$dirs[] = $full;
+					} elseif (is_file($full) && isset($audioExt[strtolower(pathinfo($entry, PATHINFO_EXTENSION))])) {
+						$files[] = $full;
+					}
+				}
+			}
+		}
 
 		foreach ($files as $file) {
 			$results[] = [
@@ -120,7 +142,7 @@ class StockAudio
 				'produced' => '',
 				'tempo' => '',
 				'genre' => '',
-				'length' => '',
+				'length' => $this->durationForPath($file),
 				'acquired' => '',
 				'notes' => '',
 				'rating' => '',
@@ -129,7 +151,6 @@ class StockAudio
 			];
 		}
 		
-		$dirs = $isFileRequest ? [] : glob($path . '/*', GLOB_ONLYDIR);
 		foreach ($dirs as $file) {
 			$results[] = [
 				'id' => ++$i,
@@ -153,6 +174,30 @@ class StockAudio
 		}
 		
 		return $results;
+	}
+
+	public function durationForPath($path) {
+		$path = rawurldecode(trim((string)$path));
+		if ($path === '' || !is_file($path)) {
+			return '';
+		}
+		$out = [];
+		$code = 1;
+		exec('soxi -D ' . escapeshellarg($path) . ' 2>/dev/null', $out, $code);
+		if ($code !== 0 || !isset($out[0]) || !is_numeric(trim($out[0]))) {
+			return '';
+		}
+		$seconds = (int)round((float)$out[0]);
+		if ($seconds < 0) {
+			return '';
+		}
+		$hours = intdiv($seconds, 3600);
+		$minutes = intdiv($seconds % 3600, 60);
+		$remain = $seconds % 60;
+		if ($hours > 0) {
+			return sprintf('%d:%02d:%02d', $hours, $minutes, $remain);
+		}
+		return sprintf('%d:%02d', $minutes, $remain);
 	}
 	
 	public function setSongRate($data)
