@@ -56,10 +56,13 @@ if (count($this->songList)) {
 								<?php } ?>
 							</div>
 							<div class="songBottomRow">
-								<span class="source songPath"><?=$song['path'] ?? $song['artist'];?> <?= $song['album'] ? ' :: ' . $song['album'] : ''; ?></span>
+								<span class="source songDuration"><?= htmlspecialchars((string)($song['length'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span>
 							</div>
 						</div>
 					</div>
+				</div>
+				<div class="songPathRow" onClick="getSong(<?=$song['id'];?>)">
+					<span class="source songPath"><?=$song['path'] ?? $song['artist'];?> <?= $song['album'] ? ' :: ' . $song['album'] : ''; ?></span>
 				</div>
 			</div>
 		<?php } else if (($song['type'] ?? null) === 'directory') {

@@ -142,7 +142,7 @@ class StockAudio
 				'produced' => '',
 				'tempo' => '',
 				'genre' => '',
-				'length' => '',
+				'length' => $this->durationForPath($file),
 				'acquired' => '',
 				'notes' => '',
 				'rating' => '',
@@ -174,6 +174,30 @@ class StockAudio
 		}
 		
 		return $results;
+	}
+
+	public function durationForPath($path) {
+		$path = rawurldecode(trim((string)$path));
+		if ($path === '' || !is_file($path)) {
+			return '';
+		}
+		$out = [];
+		$code = 1;
+		exec('soxi -D ' . escapeshellarg($path) . ' 2>/dev/null', $out, $code);
+		if ($code !== 0 || !isset($out[0]) || !is_numeric(trim($out[0]))) {
+			return '';
+		}
+		$seconds = (int)round((float)$out[0]);
+		if ($seconds < 0) {
+			return '';
+		}
+		$hours = intdiv($seconds, 3600);
+		$minutes = intdiv($seconds % 3600, 60);
+		$remain = $seconds % 60;
+		if ($hours > 0) {
+			return sprintf('%d:%02d:%02d', $hours, $minutes, $remain);
+		}
+		return sprintf('%d:%02d', $minutes, $remain);
 	}
 	
 	public function setSongRate($data)

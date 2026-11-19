@@ -106,6 +106,7 @@ class Freal
 					'source' => $playlistSong['path'],
 					'path' => $playlistSong['path'],
 					'name' => $playlistSong['name'],
+					'length' => $this->stockAudioModel->durationForPath($playlistSong['path']),
 					'type' => 'song'
 				];
 			}
